@@ -12,6 +12,7 @@ use structured_dialog::Choice;
 
 use util::window::PixelScale;
 
+mod names;
 mod structured_dialog;
 mod util;
 
@@ -116,7 +117,7 @@ fn main() {
         )))
         .insert_resource(OccuredEvents(vec![]))
         .insert_resource(Posessions(vec![]))
-        .insert_resource(DisplayLanguage("english"))
+        .insert_resource(DisplayLanguage("spanish"))
         .insert_resource(structured_dialog::DialogMessage {
             selection_index: 1,
             ..default()
@@ -715,41 +716,16 @@ pub fn dialog_display_system(
                             ..default()
                         };
 
-                        // let text_box = text_container.with_child((
-                        //     Node {
-                        //         margin: UiRect {
-                        //             left: Val::Px(15.),
-                        //             top: Val::Px(15.),
-                        //             right: Val::Px(15.),
-                        //             bottom: Val::Px(15.),
-                        //             ..default()
-                        //         },
-                        //         ..default()
-                        //     },
-                        //     TextLayout::default(),
-                        // ));
-
                         let text = if display_language.0 == "english" {
                             &dialog.language.english
                         } else {
                             &dialog.language.spanish
                         };
-                        // let new_text_box = text_container.despawn_descendants().with_child((
-                        //     Node {
-                        //         margin: UiRect {
-                        //             left: Val::Px(15.),
-                        //             top: Val::Px(15.),
-                        //             right: Val::Px(15.),
-                        //             bottom: Val::Px(15.),
-                        //             ..default()
-                        //         },
-                        //         ..default()
-                        //     },
-                        //     Text::default(),
-                        //     // Text::new(format!("{}\n", text.clone())),
-                        // ));
+                        let mut rng = rand::thread_rng();
+                        let text = text.replace("{0}", &names::name());
+                        let text = text.replace("{1}", &rng.gen_range(1..10).to_string());
+                        let text = text.replace("{2}", "");
 
-                        // new_text_box.with_children(|p| {
                         p.spawn((text_font.clone(), TextSpan::new(text.clone())));
                         info!("Should be displaying: {}", text);
 

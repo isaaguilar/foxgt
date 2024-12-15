@@ -1,0 +1,55 @@
+{
+    "dialogs": [
+        {
+            "id": "ride",
+            "name": "passenger",
+            "events": [],
+            "posessions": [],
+            "language": {
+                "english": "Passenger: {0}\n\nDistance (km): {1}\n\n{2}",
+                "spanish": "Pasajero: {0}\n\nDistancia: {1}\n\n{2}"
+            },
+            "choices": [
+                {
+                    "choice": "0",
+                    "dialog": {
+                        "language": {
+                            "english": "Take the job",
+                            "spanish": "Aceptar la tarea"
+                        },
+                        "actions": {
+                            "events_changed_on_enter": [],
+                            "items_changed_on_enter": [],
+                            "events_changed_on_exit": [],
+                            "items_changed_on_exit": [],
+                            "next_id": ""
+                        }
+                    }
+                },
+                {
+                    "choice": "1",
+                    "dialog": {
+                        "language": {
+                            "english": "Leave the job",
+                            "spanish": "Dejar la tarea"
+                        },
+                        "actions": {
+                            "events_changed_on_enter": [],
+                            "items_changed_on_enter": [],
+                            "events_changed_on_exit": [],
+                            "items_changed_on_exit": [],
+                            "next_id": ""
+                        }
+                    }
+                }
+            ],
+            "actions": {
+                "events_changed_on_enter": [],
+                "items_changed_on_enter": [],
+                "events_changed_on_exit": [],
+                "items_changed_on_exit": [],
+                "next_id": ""
+            }
+        }
+    ]
+}
