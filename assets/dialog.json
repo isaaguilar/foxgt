@@ -6,8 +6,8 @@
             "events": [],
             "posessions": [],
             "language": {
-                "english": "Passenger: {0}\n\nDistance (km): {1}\n\n{2}",
-                "spanish": "Pasajero: {0}\n\nDistancia: {1}\n\n{2}"
+                "english": "Passenger: {person}\n\nDistance: {distance} km\n\nPrice: {price} coins",
+                "spanish": "Pasajero: {person}\n\nDistancia: {distance} km\n\nPrecio: {price} monedas"
             },
             "choices": [
                 {
@@ -32,6 +32,110 @@
                         "language": {
                             "english": "Leave the job",
                             "spanish": "Dejar la tarea"
+                        },
+                        "actions": {
+                            "events_changed_on_enter": [],
+                            "items_changed_on_enter": [],
+                            "events_changed_on_exit": [],
+                            "items_changed_on_exit": [],
+                            "next_id": ""
+                        }
+                    }
+                }
+            ],
+            "actions": {
+                "events_changed_on_enter": [],
+                "items_changed_on_enter": [],
+                "events_changed_on_exit": [],
+                "items_changed_on_exit": [],
+                "next_id": ""
+            }
+        },
+        {
+            "id": "drop off soon",
+            "name": "passenger",
+            "events": [],
+            "posessions": [],
+            "language": {
+                "english": "My stop is coming up",
+                "spanish": "Mi parada se acerca"
+            },
+            "actions": {
+                "events_changed_on_enter": [],
+                "items_changed_on_enter": [],
+                "events_changed_on_exit": [],
+                "items_changed_on_exit": [],
+                "next_id": ""
+            }
+        },
+        {
+            "id": "here",
+            "name": "passenger",
+            "events": [],
+            "posessions": [],
+            "language": {
+                "english": "I'll get out here",
+                "spanish": "Me bajaré aquí"
+            },
+            "actions": {
+                "events_changed_on_enter": [],
+                "items_changed_on_enter": [],
+                "events_changed_on_exit": [],
+                "items_changed_on_exit": [],
+                "next_id": ""
+            }
+        },
+        {
+            "id": "bye",
+            "name": "passenger",
+            "events": [],
+            "posessions": [],
+            "language": {
+                "english": "Thanks, here you go.\n\n{person} gives you \n\n{price} coins & {tip} tip",
+                "spanish": "Gracias, aquí tienes.\n\n--------\n\n{person} te da \n\n{price} monedas & {tip} propina"
+            },
+            "choices": [
+                {
+                    "choice": "thanks",
+                    "dialog": {
+                        "language": {
+                            "english": "See you later",
+                            "spanish": "Hasta luego"
+                        },
+                        "actions": {
+                            "events_changed_on_enter": [],
+                            "items_changed_on_enter": [],
+                            "events_changed_on_exit": [],
+                            "items_changed_on_exit": [],
+                            "next_id": ""
+                        }
+                    }
+                }
+            ],
+            "actions": {
+                "events_changed_on_enter": [],
+                "items_changed_on_enter": [],
+                "events_changed_on_exit": [],
+                "items_changed_on_exit": [],
+                "next_id": ""
+            }
+        },
+        {
+            "id": "game over",
+            "name": "passenger",
+            "events": [],
+            "posessions": [],
+            "language": {
+                "english": "Game over",
+                "spanish": "Fin del Juego"
+            },
+            "choices": [
+                {
+                    "choice": "play again",
+                    "dialog": {
+                        "language": {
+                            "english": "...",
+                            "spanish": "..."
                         },
                         "actions": {
                             "events_changed_on_enter": [],

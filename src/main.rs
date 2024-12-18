@@ -1,4 +1,5 @@
 use bevy::{
+    ecs::query,
     math::NormedVectorSpace,
     prelude::*,
     render::{camera::ScalingMode, view::visibility},
@@ -44,6 +45,28 @@ pub struct InteractionRateLimit(pub Timer);
 #[derive(Component)]
 pub struct SelectionMarker(pub String);
 
+#[derive(Resource, Default)]
+pub struct Taxi {
+    pub rides: Vec<Ride>,
+    pub closest_person: Option<Entity>,
+    pub current_rider: Option<Entity>,
+    pub total_earnings: f32,
+    pub spent: f32,
+    pub earnings: f32,
+    pub time_limit_required_earnings: f32,
+    pub time_limit: Timer,
+}
+
+pub struct Ride {
+    pub who: Entity,
+    pub name: String,
+    pub accepted: Option<bool>,
+    pub distance: f32,
+    pub completed: bool,
+    pub trip_cost: f32,
+    pub tip: f32,
+}
+
 #[derive(Resource)]
 pub struct CurrentSelection(pub String);
 
@@ -63,6 +86,12 @@ pub struct PlayerHealth {
     pub level: f32,
 }
 
+#[derive(Resource, Default)]
+pub struct Travel {
+    distance: f32,
+    traveled: f32,
+}
+
 #[derive(Component)]
 pub struct PlayerMarker;
 
@@ -79,6 +108,9 @@ pub struct Car {
 
 #[derive(Component)]
 pub struct PersonMarker;
+
+#[derive(Component)]
+pub struct UiElement(String);
 
 #[derive(Component)]
 pub struct PersonHighlightMarker;
@@ -101,7 +133,7 @@ fn main() {
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "Fox GT".to_string(),
+                    title: "Taxi GT".to_string(),
                     resolution: (WINDOW_X, WINDOW_Y).into(),
                     visible: true,
                     ..default()
@@ -110,6 +142,11 @@ fn main() {
             }),
             JsonAssetPlugin::<structured_dialog::GameScript>::new(&[".json"]),
         ))
+        .insert_resource(Travel::default())
+        .insert_resource(Taxi {
+            time_limit: Timer::from_seconds(60.0, TimerMode::Once),
+            ..default()
+        })
         .insert_resource(CurrentSelection(String::new()))
         .insert_resource(InteractionRateLimit(Timer::from_seconds(
             0.05,
@@ -132,7 +169,6 @@ fn main() {
             (util::window::hud_resizer, util::window::hud_scale_updater),
         )
         .add_systems(Update, keyboad_input_change_system)
-        .add_systems(Update, keyboard_input_system)
         .add_systems(
             Update,
             (dialog_display_system, dialog_choice_selection_system),
@@ -159,80 +195,6 @@ fn setup(
 
     let dialog = structured_dialog::DialogHandle(asset_server.load("dialog.json"));
     commands.insert_resource(dialog);
-
-    // commands
-    //     .spawn((
-    //         DialogDisplay,
-    //         util::window::Scalers {
-    //             left: Some(Val::Px(20.0)),
-    //             // right: Some(Val::Px(75.0)),
-    //             top: Some(Val::Px(15.0)),
-    //             // width: Some(Val::Px(704.)),
-    //             ..default()
-    //         },
-    //         Node {
-    //             position_type: PositionType::Absolute,
-    //             // display: Display::None,
-    //             ..default()
-    //         },
-    //     ))
-    //     .with_child((
-    //         DialogTextbox,
-    //         BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
-    //         Node {
-    //             // background_color: BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
-    //             width: Val::Px(600.),
-    //             position_type: PositionType::Absolute,
-    //             // align_items: AlignItems::Start,
-    //             padding: UiRect {
-    //                 left: Val::Percent(1.),
-    //                 right: Val::Percent(1.),
-    //                 top: Val::Percent(1.),
-    //                 bottom: Val::Percent(0.),
-    //             },
-    //             ..default()
-    //         },
-    //     ));
-    // .with_children(|commands| {
-    //     commands.spawn((
-    //         Text::new("hello"),
-    //         TextFont {
-    //             font: asset_server.load("fonts/PressStart2P-vaV7.ttf"),
-    //             font_size: 18.0,
-    //             ..default()
-    //         },
-    //         Node {
-    //             margin: UiRect {
-    //                 left: Val::Px(15.),
-    //                 top: Val::Px(15.),
-    //                 right: Val::Px(15.),
-    //                 bottom: Val::Px(15.),
-    //                 ..default()
-    //             },
-    //             ..default()
-    //         },
-    //         // Text::from_section(
-    //         //     String::new(),
-    //         //     TextStyle {
-    //         //         font: asset_server.load("fonts/PressStart2P-vaV7.ttf"),
-    //         //         font_size: 18.0,
-    //         //         ..default()
-    //         //     },
-    //         // )
-    //         // .with_style(Style {
-    //         //     margin: UiRect {
-    //         //         left: Val::Px(15.),
-    //         //         top: Val::Px(15.),
-    //         //         right: Val::Px(15.),
-    //         //         bottom: Val::Px(15.),
-    //         //         ..default()
-    //         //     },
-    //         //     position_type: PositionType::Relative,
-    //         //     ..default()
-    //         // })
-    //         // .with_text_justify(JustifyText::Left),
-    //     ));
-    // });
 
     commands
         .spawn((
@@ -297,25 +259,126 @@ fn setup(
             ))
             .insert(Transform::from_xyz(x, -1. * LANE_HEIGHT, 0.));
     }
-}
 
-fn keyboard_input_system(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    player_query: Query<&PlayerHealth, With<PlayerMarker>>,
-) {
-    if keyboard.just_pressed(KeyCode::KeyE) {
-        info!("Hello")
-    } else if keyboard.just_pressed(KeyCode::KeyH) {
-        for player_health in player_query.iter() {
-            info!("Player health = {}", player_health.level);
-        }
-    }
+    commands
+        .spawn((
+            util::window::Scalers {
+                left: Some(Val::Px(20.0)),
+                // right: Some(Val::Px(75.0)),
+                bottom: Some(Val::Px(75.0)),
+                ..default()
+            },
+            Node {
+                position_type: PositionType::Absolute,
+                // display: Display::None,
+                ..default()
+            },
+        ))
+        .with_children(|p| {
+            p.spawn((
+                // BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
+                Node {
+                    // background_color: BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
+                    // width: Val::Px(100.),
+                    position_type: PositionType::Absolute,
+                    // align_items: AlignItems::Start,
+                    justify_content: JustifyContent::Center,
+                    padding: UiRect {
+                        left: Val::Percent(1.),
+                        right: Val::Percent(1.),
+                        top: Val::Percent(1.),
+                        bottom: Val::Percent(0.),
+                    },
+                    ..default()
+                },
+            ))
+            .with_children(|p| {
+                let text_style = Node {
+                    margin: UiRect {
+                        left: Val::Px(15.),
+                        top: Val::Px(15.),
+                        right: Val::Px(15.),
+                        bottom: Val::Px(15.),
+                        ..default()
+                    },
+
+                    ..default()
+                };
+                p.spawn((text_style.clone(), Text::default()))
+                    .with_children(|p| {
+                        let text_font = TextFont {
+                            font: asset_server.load("fonts/PressStart2P-vaV7.ttf"),
+                            font_size: 28.0,
+                            ..default()
+                        };
+
+                        p.spawn((
+                            UiElement(String::from("timer")),
+                            text_font.clone(),
+                            TextSpan::new(""),
+                        ));
+                    });
+            });
+            p.spawn((
+                // BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
+                Node {
+                    // background_color: BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
+                    width: Val::Px(100.),
+                    left: Val::Px(100.),
+                    position_type: PositionType::Absolute,
+                    // align_items: AlignItems::Start,
+                    padding: UiRect {
+                        left: Val::Percent(1.),
+                        right: Val::Percent(1.),
+                        top: Val::Percent(1.),
+                        bottom: Val::Percent(0.),
+                    },
+                    ..default()
+                },
+            ))
+            .with_children(|p| {
+                let text_style = Node {
+                    margin: UiRect {
+                        left: Val::Px(15.),
+                        top: Val::Px(15.),
+                        right: Val::Px(15.),
+                        bottom: Val::Px(15.),
+                        ..default()
+                    },
+
+                    ..default()
+                };
+                p.spawn((text_style.clone(), Text::default()))
+                    .with_children(|p| {
+                        let text_font = TextFont {
+                            font: asset_server.load("fonts/PressStart2P-vaV7.ttf"),
+                            font_size: 28.0,
+                            ..default()
+                        };
+
+                        p.spawn((
+                            UiElement(String::from("mustearn")),
+                            text_font.clone(),
+                            TextSpan::new("aabb ccdd eeff"),
+                        ));
+                    });
+            });
+        });
+
+    commands
+        .spawn(Sprite {
+            flip_x: false,
+            image: asset_server.load("dashboard-bg.png"),
+            ..default()
+        })
+        .insert(Transform::from_xyz(0., -320. + (75. * 1.5), 1.));
 }
 
 fn keyboad_input_change_system(
     mut commands: Commands,
     assest_server: Res<AssetServer>,
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
+    mut travel: ResMut<Travel>,
     time: Res<Time>,
     mut dialog_message: ResMut<structured_dialog::DialogMessage>,
     mut spawn_thing_timer: ResMut<SpawnThingTimer>,
@@ -356,18 +419,44 @@ fn keyboad_input_change_system(
             Without<ObstacleMarker>,
         ),
     >,
+    mut ui_element_query: Query<(&UiElement, &mut TextSpan)>,
     game_script_asset: Res<Assets<structured_dialog::GameScript>>,
+    mut taxi: ResMut<Taxi>,
 ) {
-    let right = keyboard.pressed(KeyCode::KeyD);
-    let left = keyboard.pressed(KeyCode::KeyA);
-    let gas = keyboard.pressed(KeyCode::Space);
-    let up_just_pressed = keyboard.just_pressed(KeyCode::KeyW);
-    let down_just_pressed = keyboard.just_pressed(KeyCode::KeyS);
+    let current_dialog_id = match &dialog_message.dialog {
+        Some(dialog) => match dialog.choices {
+            Some(_) => return,
+            None => Some(dialog.id.clone()),
+        },
+        None => None,
+    };
 
     let game_script = match game_script_asset.iter().next() {
         Some(d) => d.1,
         None => &structured_dialog::GameScript::default(),
     };
+
+    taxi.time_limit.tick(time.delta());
+    for (ui_element, mut text_span) in ui_element_query.iter_mut() {
+        if ui_element.0 == "timer" {
+            text_span.0 = format!("{}", taxi.time_limit.remaining_secs().round());
+        }
+    }
+
+    if taxi.time_limit.finished() {
+        let game_over = game_script
+            .dialogs
+            .iter()
+            .map(|d| d.clone())
+            .find(|d| d.id == String::from("game over"));
+        dialog_message.dialog = game_over;
+    }
+
+    let right = keyboard.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]);
+    let left = keyboard.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]);
+    let gas = keyboard.pressed(KeyCode::Space);
+    let up_just_pressed = keyboard.any_just_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
+    let down_just_pressed = keyboard.any_just_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
 
     let (mut player_transform, mut player_sprite, mut animation) = player_query.single_mut();
     animation.timer.tick(time.delta());
@@ -430,15 +519,6 @@ fn keyboad_input_change_system(
 
     let mut allow_obstable_spawn = true;
     for (obstable_entity, mut obstable_transform, car) in obstacle_query.iter_mut() {
-        if player_transform.translation.x < obstable_transform.translation.x + 2.
-            && player_transform.translation.x > obstable_transform.translation.x - 2.
-        {
-            // there was a collisiion
-            //
-
-            // player_transform.translation.y += 140.;
-        }
-
         let car_speed = car.speed;
 
         if obstable_transform.translation.x > (WINDOW_X / 2.) + 200. {
@@ -495,6 +575,14 @@ fn keyboad_input_change_system(
         }
     }
 
+    let can_drop_off = if facing_left && player_y > 100. {
+        true
+    } else if !facing_left && player_y < -100. {
+        true
+    } else {
+        false
+    };
+
     for (person_entity, mut person_global_transform, mut visibility) in
         person_highlight_query.iter_mut()
     {
@@ -518,24 +606,96 @@ fn keyboad_input_change_system(
         };
     }
 
-    let closest_persons = person_highlight_query
-        .iter()
-        .filter(|(_, transform, visiblility)| {
-            let global_transform = transform.compute_transform();
-            global_transform.translation.x.abs() <= 50. && *visiblility == Visibility::Visible
-        })
-        .next();
+    match taxi.current_rider {
+        Some(current_rider) => {
+            let info = taxi
+                .rides
+                .iter_mut()
+                .find(|ride| ride.who == current_rider)
+                .unwrap();
 
-    match closest_persons {
-        Some(_) => {
-            if animation.speed_coeff == 0.0 {
-                dialog_message.dialog = Some(game_script.dialogs[0].clone());
-                info!("Show the dialog!");
-            } else {
-                dialog_message.dialog = None;
+            if !info.completed {
+                travel.traveled += SPEED_X * animation.speed_coeff * time.delta_secs() / 1000.;
+                if travel.traveled > travel.distance {
+                } else {
+                    // info!("Traveled {} km", travel.traveled);
+                }
+
+                if travel.traveled > travel.distance {
+                    let id = current_dialog_id.unwrap_or_default();
+                    if id == String::from("drop off soon") {
+                        // info!("Clear 1");
+                        dialog_message.dialog = None
+                    } else if animation.speed_coeff > 0.0 {
+                        dialog_message.dialog = Some(game_script.dialogs[2].clone());
+                    } else if can_drop_off
+                        && animation.speed_coeff == 0.0
+                        && id == String::from("here")
+                    {
+                        dialog_message.dialog = None;
+                    } else if can_drop_off && animation.speed_coeff == 0.0 && id == String::from("")
+                    {
+                        info!("Show bye message");
+                        dialog_message.dialog = Some(game_script.dialogs[3].clone());
+                        info.completed = true;
+                    } else {
+                        // taxi.current_rider = None;
+                        // info!("Wait for input")
+                    }
+                } else if travel.traveled < travel.distance
+                    && (travel.traveled / travel.distance) > 0.70
+                {
+                    // info!("Drop off player soon");
+                    dialog_message.dialog = Some(game_script.dialogs[1].clone());
+                }
             }
         }
-        None => {}
+        None => {
+            let closest_persons = person_highlight_query
+                .iter()
+                .filter(|(_, transform, visiblility)| {
+                    let global_transform = transform.compute_transform();
+                    global_transform.translation.x.abs() <= 50.
+                        && *visiblility == Visibility::Visible
+                })
+                .next();
+
+            match closest_persons {
+                Some((closest_rider_entity, _, _)) => {
+                    if animation.speed_coeff == 0.0 {
+                        let rider = taxi.rides.iter().find(|r| r.who == closest_rider_entity);
+                        let mut rng = rand::thread_rng();
+                        let show_dialog = match rider {
+                            Some(rider) => match rider.accepted {
+                                Some(b) => b,
+                                None => true,
+                            },
+                            None => {
+                                let d = rng.gen_range(0.25..=10.0);
+                                taxi.closest_person = Some(closest_rider_entity);
+                                taxi.rides.push(Ride {
+                                    who: closest_rider_entity,
+                                    name: names::name(),
+                                    accepted: None,
+                                    distance: ((d * 100.) as f32).round() / 100.,
+                                    completed: false,
+                                    trip_cost: ((d * 7.) as f32).ceil(),
+                                    tip: 0.0,
+                                });
+                                true
+                            }
+                        };
+                        if show_dialog {
+                            dialog_message.dialog = Some(game_script.dialogs[0].clone());
+                        }
+                        // info!("Show the dialog!");
+                    } else {
+                        dialog_message.dialog = None;
+                    }
+                }
+                None => {}
+            }
+        }
     }
 
     for (person_entity, mut person_transform) in person_query.iter_mut() {
@@ -647,8 +807,10 @@ pub fn dialog_display_system(
     asset_server: Res<AssetServer>,
     display_language: ResMut<DisplayLanguage>,
     dialog_message: ResMut<structured_dialog::DialogMessage>,
-    // mut dialog_textbox_query: Query<(Entity), With<DialogTextbox>>,
-    mut dialog_display_query: Query<Entity, With<DialogDisplay>>,
+    dialog_display_query: Query<Entity, With<DialogDisplay>>,
+
+    // not consistent with regular dialog
+    taxi: Res<Taxi>,
 ) {
     let dialog = match &dialog_message.dialog {
         Some(d) => d,
@@ -721,13 +883,22 @@ pub fn dialog_display_system(
                         } else {
                             &dialog.language.spanish
                         };
-                        let mut rng = rand::thread_rng();
-                        let text = text.replace("{0}", &names::name());
-                        let text = text.replace("{1}", &rng.gen_range(1..10).to_string());
-                        let text = text.replace("{2}", "");
+
+                        let text = if let Some(current_rider) = taxi.closest_person {
+                            if let Some(info) = taxi.rides.iter().find(|r| r.who == current_rider) {
+                                text.replace("{person}", &info.name)
+                                    .replace("{distance}", &info.distance.to_string())
+                                    .replace("{price}", &info.trip_cost.to_string())
+                                    .replace("{tip}", &info.tip.to_string())
+                            } else {
+                                text.clone()
+                            }
+                        } else {
+                            text.clone()
+                        };
 
                         p.spawn((text_font.clone(), TextSpan::new(text.clone())));
-                        info!("Should be displaying: {}", text);
+                        // info!("Should be displaying: {}", text);
 
                         match &dialog.choices {
                             Some(choices) => {
@@ -736,7 +907,7 @@ pub fn dialog_display_system(
                                 // let total_choices = choices.len();
 
                                 for (index, choice) in choices.iter().enumerate() {
-                                    info!("Adding choice #{}", index);
+                                    // info!("Adding choice #{}", index);
                                     // let style = dialog_textbox.0.clone();
                                     let choice_id = choice.choice.clone();
 
@@ -775,11 +946,16 @@ pub fn dialog_choice_selection_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     // axes: Res<Axis<GamepadAxis>>,
     mut current_selection: ResMut<CurrentSelection>,
-    dialog_message: Res<structured_dialog::DialogMessage>,
+    mut dialog_message: ResMut<structured_dialog::DialogMessage>,
     mut selections: Query<(&SelectionMarker, &mut TextSpan)>,
+
+    // not consistent with regular dialog
+    mut travel: ResMut<Travel>,
+    mut taxi: ResMut<Taxi>,
 ) {
-    let up_key_pressed = keyboard_input.pressed(KeyCode::ArrowUp);
-    let down_key_pressed = keyboard_input.pressed(KeyCode::ArrowDown);
+    let up_key_pressed = keyboard_input.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
+    let down_key_pressed = keyboard_input.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
+    let enter_key_just_pressed = keyboard_input.any_just_pressed([KeyCode::KeyE, KeyCode::Enter]);
 
     let dialog = match &dialog_message.dialog {
         Some(d) => d,
@@ -797,6 +973,32 @@ pub fn dialog_choice_selection_system(
         }
         None => return,
     };
+
+    if enter_key_just_pressed {
+        dialog_message.dialog = None;
+        if taxi.current_rider.is_some() {
+            taxi.current_rider = None;
+        } else if let Some(closest_person) = taxi.closest_person {
+            if current_selection.0 == "0" {
+                taxi.current_rider = taxi.closest_person;
+                match taxi.rides.iter_mut().find(|r| r.who == closest_person) {
+                    Some(ride) => {
+                        travel.distance = ride.distance;
+                        travel.traveled = 0.0;
+                    }
+                    None => todo!(),
+                }
+            } else {
+                taxi.current_rider = None;
+                taxi.rides
+                    .iter_mut()
+                    .filter(|r| r.who == closest_person)
+                    .for_each(|ride| ride.accepted = Some(false));
+            }
+        }
+
+        return;
+    }
 
     interaction_rate_limit.0.tick(time.delta());
     if interaction_rate_limit.0.finished() || interaction_rate_limit.0.just_finished() {
@@ -852,215 +1054,4 @@ pub fn dialog_choice_selection_system(
             }
         }
     }
-
-    // for entity in main_menu_section_query.iter() {
-
-    //     let text_box = commands.entity(entity);
-
-    //     let min_selection_index = 1;
-
-    //     let max_selection_index = text_sections.sections.len() - 1;
-    //     if min_selection_index == max_selection_index {
-    //         // this isn't really a selection, is it?
-    //         warn!("A single selection was detected");
-    //     }
-
-    //     if interaction_rate_limit.0.finished() || interaction_rate_limit.0.just_finished() {
-    //         let idx = if up_key_pressed {
-    //             interaction_rate_limit.0.reset();
-    //             if dialog_message.selection_index <= min_selection_index {
-    //                 min_selection_index
-    //             } else {
-    //                 dialog_message.selection_index - 1
-    //             }
-    //         } else if down_key_pressed {
-    //             interaction_rate_limit.0.reset();
-    //             if dialog_message.selection_index >= max_selection_index {
-    //                 max_selection_index
-    //             } else {
-    //                 dialog_message.selection_index + 1
-    //             }
-    //         } else {
-    //             dialog_message.selection_index
-    //         };
-
-    //         dialog_message.selection_index = idx;
-    //     }
-    // }
 }
-
-// pub fn npc_dialog(
-//     time: Res<Time>,
-//     mut interaction_rate_limit: ResMut<InteractionRateLimit>,
-//     display_language: ResMut<DisplayLanguage>,
-//     mut occurred_events: ResMut<OccuredEvents>,
-//     mut possessions: ResMut<Posessions>,
-//     game_script_asset: Res<Assets<structured_dialog::GameScript>>,
-//     mut dialog_message: ResMut<structured_dialog::DialogMessage>,
-//     keyboard: Res<ButtonInput<KeyCode>>,
-//     in_range_npc_query: Query<&InteractionObjectOptions, With<InteractionAvailable>>,
-// ) {
-//     interaction_rate_limit.0.tick(time.delta());
-//     if !keyboard.just_pressed(KeyCode::KeyE) {
-//         return;
-//     }
-
-//     let game_script = match game_script_asset.iter().next() {
-//         Some(d) => d.1,
-//         None => &structured_dialog::GameScript::default(),
-//     };
-//     // info!(?game_script);
-
-//     let npc = match in_range_npc_query.get_single() {
-//         Ok(npc) => npc,
-//         Err(_) => {
-//             dialog_message.reset();
-//             return;
-//         }
-//     };
-
-//     if interaction_rate_limit.0.finished() || interaction_rate_limit.0.just_finished() {
-//         interaction_rate_limit.0.reset();
-
-//         match &dialog_message.dialog {
-//             Some(dialog) => {
-//                 // Perform on_exit actions for the currnet dialog
-//                 let actions = match &dialog.choices {
-//                     Some(choices) => {
-//                         let selection_index = if dialog_message.selection_index > 0 {
-//                             // correct the choice selection to account for its position in text
-//                             dialog_message.selection_index - 1
-//                         } else {
-//                             0
-//                         };
-//                         match &choices.get(selection_index) {
-//                             Some(choice) => &choice.dialog.actions,
-//                             None => {
-//                                 // this is an error but we can't handle it without breaking
-//                                 // hopefully this never happens or we'll be in a bad state
-//                                 error!(
-//                                     "Index for choices was invalid, where index={} and {:?}",
-//                                     selection_index, choices
-//                                 );
-//                                 dialog_message.reset();
-//                                 return;
-//                             }
-//                         }
-//                     }
-//                     None => &dialog.actions,
-//                 };
-
-//                 // update_events(actions, &mut occurred_events, "on_exit");
-//                 // update_posessions(actions, &mut possessions, "on_exit");
-
-//                 let next_id = &actions.next_id;
-
-//                 info!(next_id);
-//                 match game_script
-//                     .dialogs
-//                     .iter()
-//                     .find(|npc_dialog| npc_dialog.id == *next_id)
-//                 {
-//                     Some(next_dialog) => {
-//                         let s = if display_language.0 == "english" {
-//                             next_dialog.language.english.clone()
-//                         } else {
-//                             next_dialog.language.spanish.clone()
-//                         };
-
-//                         dialog_message.dialog = Some(next_dialog.clone());
-//                         // update_events(&next_dialog.actions, &mut occurred_events, "on_enter");
-//                         // update_posessions(&next_dialog.actions, &mut possessions, "on_enter");
-//                     }
-//                     None => {
-//                         dialog_message.reset();
-//                     }
-//                 }
-//             }
-//             None => {
-//                 let npc_dialogs = game_script
-//                     .dialogs
-//                     .clone()
-//                     .into_iter()
-//                     .filter(|n| &n.name == npc.dialog_name.as_ref().unwrap())
-//                     .filter(|n| {
-//                         n.events.iter().all(|event| {
-//                             if event.starts_with('!') {
-//                                 let not_event = event.strip_prefix("!").unwrap().to_string();
-//                                 !occurred_events.0.contains(&not_event)
-//                             } else {
-//                                 occurred_events.0.contains(event)
-//                             }
-//                         })
-//                     })
-//                     .filter(|n| {
-//                         n.posessions.iter().all(|possession| {
-//                             if possession.starts_with('!') {
-//                                 let not_possession =
-//                                     possession.strip_prefix("!").unwrap().to_string();
-//                                 !possessions.0.contains(&not_possession)
-//                             } else {
-//                                 possessions.0.contains(possession)
-//                             }
-//                         })
-//                     })
-//                     .collect::<Vec<_>>();
-
-//                 let dialog_ids = npc_dialogs.iter().map(|d| &d.id).collect::<Vec<_>>();
-//                 info!(?dialog_ids);
-//                 let dialog_with_choices = npc_dialogs
-//                     .clone()
-//                     .into_iter()
-//                     .filter(|n| n.choices.is_some())
-//                     .collect::<Vec<_>>();
-//                 let mut rng = rand::thread_rng();
-//                 let selected_dialog = if dialog_with_choices.is_empty() {
-//                     // No choices detected
-//                     npc_dialogs.choose(&mut rng)
-//                 } else {
-//                     dialog_with_choices.choose(&mut rng)
-//                 };
-
-//                 if let Some(npc_dialog) = selected_dialog {
-//                     let s = if display_language.0 == "english" {
-//                         npc_dialog.language.english.clone()
-//                     } else {
-//                         npc_dialog.language.spanish.clone()
-//                     };
-
-//                     dialog_message.dialog = Some(npc_dialog.clone());
-
-//                     for event in &npc_dialog.actions.events_changed_on_enter {
-//                         if event.starts_with('!') {
-//                             let event_to_remove = event.strip_prefix("!").unwrap().to_string();
-//                             if let Some(index) = occurred_events
-//                                 .0
-//                                 .iter()
-//                                 .position(|item| *item == event_to_remove)
-//                             {
-//                                 occurred_events.0.remove(index);
-//                             }
-//                         } else if !occurred_events.0.contains(event) {
-//                             occurred_events.0.push(event.clone());
-//                         }
-//                     }
-//                     for posession in &npc_dialog.actions.items_changed_on_enter {
-//                         if posession.starts_with('!') {
-//                             let posession_to_remove =
-//                                 posession.strip_prefix("!").unwrap().to_string();
-//                             if let Some(index) = possessions
-//                                 .0
-//                                 .iter()
-//                                 .position(|item| *item == posession_to_remove)
-//                             {
-//                                 possessions.0.remove(index);
-//                             }
-//                         } else if !possessions.0.contains(posession) {
-//                             possessions.0.push(posession.clone());
-//                         }
-//                     }
-//                 };
-//             }
-//         }
-//     }
-// }
