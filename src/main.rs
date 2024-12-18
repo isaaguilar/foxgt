@@ -50,11 +50,6 @@ pub struct Taxi {
     pub rides: Vec<Ride>,
     pub closest_person: Option<Entity>,
     pub current_rider: Option<Entity>,
-    pub total_earnings: f32,
-    pub spent: f32,
-    pub earnings: f32,
-    pub time_limit_required_earnings: f32,
-    pub time_limit: Timer,
 }
 
 pub struct Ride {
@@ -81,9 +76,15 @@ pub struct SpawnThingTimer {
     timer: Timer,
 }
 
-#[derive(Component)]
+#[derive(Resource, Default)]
 pub struct PlayerHealth {
     pub level: f32,
+    pub total_earnings: f32,
+    pub spent: f32,
+    pub earnings: f32,
+    pub time_limit_required_earnings: f32,
+    pub time_limit: Timer,
+    pub cycles_completed: u32,
 }
 
 #[derive(Resource, Default)]
@@ -122,8 +123,9 @@ pub struct PlayerCar {
     pub atlas_left: (usize, usize),
     pub atlas_right: (usize, usize),
 }
+
 #[derive(Component)]
-pub struct DialogDisplay;
+pub struct DialogDisplay(String);
 
 #[derive(Component)]
 pub struct DialogTextbox;
@@ -143,10 +145,12 @@ fn main() {
             JsonAssetPlugin::<structured_dialog::GameScript>::new(&[".json"]),
         ))
         .insert_resource(Travel::default())
-        .insert_resource(Taxi {
+        .insert_resource(PlayerHealth {
+            time_limit_required_earnings: 50.,
             time_limit: Timer::from_seconds(60.0, TimerMode::Once),
             ..default()
         })
+        .insert_resource(Taxi { ..default() })
         .insert_resource(CurrentSelection(String::new()))
         .insert_resource(InteractionRateLimit(Timer::from_seconds(
             0.05,
@@ -168,7 +172,7 @@ fn main() {
             PreUpdate,
             (util::window::hud_resizer, util::window::hud_scale_updater),
         )
-        .add_systems(Update, keyboad_input_change_system)
+        .add_systems(Update, (game_level_system, keyboad_input_change_system))
         .add_systems(
             Update,
             (dialog_display_system, dialog_choice_selection_system),
@@ -198,7 +202,6 @@ fn setup(
 
     commands
         .spawn((
-            PlayerHealth { level: 900. },
             PlayerMarker,
             PlayerCar {
                 speed_coeff: 0.,
@@ -348,18 +351,109 @@ fn setup(
 
                     ..default()
                 };
+
                 p.spawn((text_style.clone(), Text::default()))
                     .with_children(|p| {
                         let text_font = TextFont {
                             font: asset_server.load("fonts/PressStart2P-vaV7.ttf"),
-                            font_size: 28.0,
+                            font_size: 12.0,
                             ..default()
                         };
 
                         p.spawn((
-                            UiElement(String::from("mustearn")),
+                            UiElement(String::from("must_earn")),
                             text_font.clone(),
-                            TextSpan::new("aabb ccdd eeff"),
+                            TextSpan::new(""),
+                        ));
+                    });
+            });
+
+            p.spawn((
+                // BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
+                Node {
+                    // background_color: BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
+                    width: Val::Px(100.),
+                    left: Val::Px(200.),
+                    position_type: PositionType::Absolute,
+                    // align_items: AlignItems::Start,
+                    padding: UiRect {
+                        left: Val::Percent(1.),
+                        right: Val::Percent(1.),
+                        top: Val::Percent(1.),
+                        bottom: Val::Percent(0.),
+                    },
+                    ..default()
+                },
+            ))
+            .with_children(|p| {
+                let text_style = Node {
+                    margin: UiRect {
+                        left: Val::Px(15.),
+                        top: Val::Px(15.),
+                        right: Val::Px(15.),
+                        bottom: Val::Px(15.),
+                        ..default()
+                    },
+
+                    ..default()
+                };
+                p.spawn((text_style.clone(), Text::default()))
+                    .with_children(|p| {
+                        let text_font = TextFont {
+                            font: asset_server.load("fonts/PressStart2P-vaV7.ttf"),
+                            font_size: 12.0,
+                            ..default()
+                        };
+
+                        p.spawn((
+                            UiElement(String::from("earned")),
+                            text_font.clone(),
+                            TextSpan::new(""),
+                        ));
+                    });
+            });
+
+            p.spawn((
+                // BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
+                Node {
+                    // background_color: BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
+                    width: Val::Px(100.),
+                    left: Val::Px(300.),
+                    position_type: PositionType::Absolute,
+                    // align_items: AlignItems::Start,
+                    padding: UiRect {
+                        left: Val::Percent(1.),
+                        right: Val::Percent(1.),
+                        top: Val::Percent(1.),
+                        bottom: Val::Percent(0.),
+                    },
+                    ..default()
+                },
+            ))
+            .with_children(|p| {
+                let text_style = Node {
+                    margin: UiRect {
+                        left: Val::Px(15.),
+                        top: Val::Px(15.),
+                        right: Val::Px(15.),
+                        bottom: Val::Px(15.),
+                        ..default()
+                    },
+
+                    ..default()
+                };
+                p.spawn((text_style.clone(), Text::default()))
+                    .with_children(|p| {
+                        let text_font = TextFont {
+                            font: asset_server.load("fonts/PressStart2P-vaV7.ttf"),
+                            font_size: 12.0,
+                            ..default()
+                        };
+
+                        p.spawn((
+                            UiElement(String::from("total_earned")),
+                            text_font.clone(),
+                            TextSpan::new(""),
                         ));
                     });
             });
@@ -371,7 +465,62 @@ fn setup(
             image: asset_server.load("dashboard-bg.png"),
             ..default()
         })
-        .insert(Transform::from_xyz(0., -320. + (75. * 1.5), 1.));
+        .insert(Transform::from_xyz(0., -320. + (0. * 75. * 1.5), 1.));
+}
+
+fn game_level_system(
+    time: Res<Time>,
+    mut player_data: ResMut<PlayerHealth>,
+    mut dialog_message: ResMut<structured_dialog::DialogMessage>,
+    game_script_asset: Res<Assets<structured_dialog::GameScript>>,
+    mut ui_element_query: Query<(&UiElement, &mut TextSpan)>,
+) {
+    match &dialog_message.dialog {
+        Some(dialog) => match dialog.choices {
+            Some(_) => return,
+            None => {}
+        },
+        None => {}
+    }
+
+    let game_script = match game_script_asset.iter().next() {
+        Some(d) => d.1,
+        None => &structured_dialog::GameScript::default(),
+    };
+
+    player_data.time_limit.tick(time.delta());
+    for (ui_element, mut text_span) in ui_element_query.iter_mut() {
+        if ui_element.0 == "timer" {
+            text_span.0 = format!("{}", player_data.time_limit.remaining_secs().round());
+        }
+        if ui_element.0 == "must_earn" {
+            text_span.0 = format!("Must earn\n{}", player_data.time_limit_required_earnings);
+        }
+        if ui_element.0 == "earned" {
+            text_span.0 = format!("Earned\n{}", player_data.earnings);
+        }
+        if ui_element.0 == "total_earned" {
+            text_span.0 = format!("Total earned\n{}", player_data.total_earnings);
+        }
+    }
+
+    if player_data.time_limit.just_finished() {
+        if player_data.earnings > player_data.time_limit_required_earnings {
+            let x = player_data.cycles_completed as f32;
+            // simple for now, but quickly will becomes impossible
+            player_data.time_limit_required_earnings = 0.1 * x.powi(2) + 0.5 * x + 50.;
+            player_data.time_limit.reset();
+            player_data.earnings = 0.0;
+            player_data.cycles_completed += 1;
+        } else {
+            let game_over = game_script
+                .dialogs
+                .iter()
+                .map(|d| d.clone())
+                .find(|d| d.id == String::from("game over"));
+            dialog_message.dialog = game_over;
+        }
+    }
 }
 
 fn keyboad_input_change_system(
@@ -381,6 +530,7 @@ fn keyboad_input_change_system(
     mut travel: ResMut<Travel>,
     time: Res<Time>,
     mut dialog_message: ResMut<structured_dialog::DialogMessage>,
+    game_script_asset: Res<Assets<structured_dialog::GameScript>>,
     mut spawn_thing_timer: ResMut<SpawnThingTimer>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut road_query: Query<(&mut Transform), With<RoadMarker>>,
@@ -419,9 +569,9 @@ fn keyboad_input_change_system(
             Without<ObstacleMarker>,
         ),
     >,
-    mut ui_element_query: Query<(&UiElement, &mut TextSpan)>,
-    game_script_asset: Res<Assets<structured_dialog::GameScript>>,
+
     mut taxi: ResMut<Taxi>,
+    mut player_data: ResMut<PlayerHealth>,
 ) {
     let current_dialog_id = match &dialog_message.dialog {
         Some(dialog) => match dialog.choices {
@@ -435,22 +585,6 @@ fn keyboad_input_change_system(
         Some(d) => d.1,
         None => &structured_dialog::GameScript::default(),
     };
-
-    taxi.time_limit.tick(time.delta());
-    for (ui_element, mut text_span) in ui_element_query.iter_mut() {
-        if ui_element.0 == "timer" {
-            text_span.0 = format!("{}", taxi.time_limit.remaining_secs().round());
-        }
-    }
-
-    if taxi.time_limit.finished() {
-        let game_over = game_script
-            .dialogs
-            .iter()
-            .map(|d| d.clone())
-            .find(|d| d.id == String::from("game over"));
-        dialog_message.dialog = game_over;
-    }
 
     let right = keyboard.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]);
     let left = keyboard.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]);
@@ -635,7 +769,10 @@ fn keyboad_input_change_system(
                         dialog_message.dialog = None;
                     } else if can_drop_off && animation.speed_coeff == 0.0 && id == String::from("")
                     {
+                        // SUCCESSFUL DROP OFF
                         info!("Show bye message");
+                        player_data.earnings += info.trip_cost + info.tip;
+                        player_data.total_earnings += info.trip_cost + info.tip;
                         dialog_message.dialog = Some(game_script.dialogs[3].clone());
                         info.completed = true;
                     } else {
@@ -807,7 +944,7 @@ pub fn dialog_display_system(
     asset_server: Res<AssetServer>,
     display_language: ResMut<DisplayLanguage>,
     dialog_message: ResMut<structured_dialog::DialogMessage>,
-    dialog_display_query: Query<Entity, With<DialogDisplay>>,
+    dialog_display_query: Query<(Entity, &DialogDisplay), With<DialogDisplay>>,
 
     // not consistent with regular dialog
     taxi: Res<Taxi>,
@@ -815,19 +952,26 @@ pub fn dialog_display_system(
     let dialog = match &dialog_message.dialog {
         Some(d) => d,
         None => {
-            for entity in dialog_display_query.iter() {
+            for (entity, _) in dialog_display_query.iter() {
                 commands.entity(entity).despawn_recursive();
             }
             return;
         }
     };
+
+    for (entity, dialog_display) in dialog_display_query.iter() {
+        if dialog_display.0 != dialog.id {
+            commands.entity(entity).despawn_recursive();
+        }
+    }
+
     if !dialog_display_query.is_empty() {
         return;
     }
 
     commands
         .spawn((
-            DialogDisplay,
+            DialogDisplay(dialog.id.clone()),
             util::window::Scalers {
                 left: Some(Val::Px(20.0)),
                 // right: Some(Val::Px(75.0)),
@@ -975,6 +1119,9 @@ pub fn dialog_choice_selection_system(
     };
 
     if enter_key_just_pressed {
+        if current_selection.0 == "play again" {
+            return;
+        }
         dialog_message.dialog = None;
         if taxi.current_rider.is_some() {
             taxi.current_rider = None;
