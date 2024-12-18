@@ -7,6 +7,7 @@ use bevy::{
     prelude::*,
     render::{camera::ScalingMode, view::visibility},
     text,
+    utils::hashbrown::HashMap,
 };
 use bevy_common_assets::json::JsonAssetPlugin;
 use rand::prelude::SliceRandom;
@@ -108,11 +109,12 @@ pub struct RoadMarker;
 #[derive(Component)]
 pub struct CarMarker;
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct Car {
     pub aabb: Aabb2d,
     pub speed: f32,
     pub intersects_player: bool,
+    pub intersects_npc: bool,
 }
 
 #[derive(Component)]
@@ -493,16 +495,36 @@ fn setup(
 
 fn car_intersection_system(
     player_car_query: Query<&PlayerCar>,
-    mut npc_car_query: Query<&mut Car>,
+    mut npc_car_query: Query<(Entity, &mut Car)>,
 ) {
     let player_car = player_car_query.single();
-    for mut npc_car in npc_car_query.iter_mut() {
+    for (_, mut npc_car) in npc_car_query.iter_mut() {
         if player_car.aabb.intersects(&npc_car.aabb) {
             npc_car.intersects_player = true;
         } else {
             npc_car.intersects_player = false;
         }
     }
+
+    let mut entitys_intersected: Vec<Entity> = vec![];
+    for (e1, npc_car1) in npc_car_query.iter() {
+        for (e2, npc_car2) in npc_car_query.iter() {
+            if e1 == e2 {
+                continue;
+            }
+
+            if npc_car1.aabb.intersects(&npc_car2.aabb) {
+                entitys_intersected.push(e1);
+            }
+        }
+    }
+
+    npc_car_query.iter_mut().for_each(|(entity, mut npc_car)| {
+        if entitys_intersected.contains(&entity) {
+            npc_car.intersects_npc = true;
+            info!("NPCs intersected");
+        }
+    });
 }
 
 fn game_level_system(
@@ -708,6 +730,7 @@ fn keyboad_input_change_system(
                     (1. - 1.5 * player_car.speed_coeff) * car_speed * time.delta_secs();
                 let speed_up_x_translation =
                     (1.0 + (1.5 * player_car.speed_coeff)) * car_speed * time.delta_secs();
+
                 if npc_car_transform.translation.y > 0. {
                     //  car is going left
                     if facing_left {
@@ -741,7 +764,6 @@ fn keyboad_input_change_system(
                     npc_car_transform.translation.x -= x_translation;
                     npc_car.aabb.translate_by(Vec2::new(-x_translation, 0.0));
                 } else {
-                    info!(x_translation);
                     npc_car_transform.translation.x += x_translation;
                     npc_car.aabb.translate_by(Vec2::new(x_translation, 0.0));
                 }
@@ -978,6 +1000,7 @@ fn keyboad_input_change_system(
                         },
                         speed: rng.gen_range(200.0..290.0),
                         intersects_player: false,
+                        intersects_npc: false,
                     },
                     Sprite {
                         flip_x: flip_x,
