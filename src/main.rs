@@ -1,6 +1,9 @@
 use bevy::{
     ecs::query,
-    math::NormedVectorSpace,
+    math::{
+        bounding::{Aabb2d, BoundingVolume, IntersectsVolume},
+        vec2, NormedVectorSpace,
+    },
     prelude::*,
     render::{camera::ScalingMode, view::visibility},
     text,
@@ -44,6 +47,9 @@ pub struct InteractionRateLimit(pub Timer);
 
 #[derive(Component)]
 pub struct SelectionMarker(pub String);
+
+#[derive(Component, Default)]
+struct Intersects(bool);
 
 #[derive(Resource, Default)]
 pub struct Taxi {
@@ -100,11 +106,13 @@ pub struct PlayerMarker;
 pub struct RoadMarker;
 
 #[derive(Component)]
-pub struct ObstacleMarker;
+pub struct CarMarker;
 
 #[derive(Component)]
 pub struct Car {
+    pub aabb: Aabb2d,
     pub speed: f32,
+    pub intersects_player: bool,
 }
 
 #[derive(Component)]
@@ -118,6 +126,7 @@ pub struct PersonHighlightMarker;
 
 #[derive(Component)]
 pub struct PlayerCar {
+    pub aabb: Aabb2d,
     pub speed_coeff: f32,
     pub timer: Timer,
     pub atlas_left: (usize, usize),
@@ -158,7 +167,7 @@ fn main() {
         )))
         .insert_resource(OccuredEvents(vec![]))
         .insert_resource(Posessions(vec![]))
-        .insert_resource(DisplayLanguage("spanish"))
+        .insert_resource(DisplayLanguage("english"))
         .insert_resource(structured_dialog::DialogMessage {
             selection_index: 1,
             ..default()
@@ -172,7 +181,15 @@ fn main() {
             PreUpdate,
             (util::window::hud_resizer, util::window::hud_scale_updater),
         )
-        .add_systems(Update, (game_level_system, keyboad_input_change_system))
+        .add_systems(
+            Update,
+            (
+                game_level_system,
+                keyboad_input_change_system,
+                road_line_system,
+                car_intersection_system,
+            ),
+        )
         .add_systems(
             Update,
             (dialog_display_system, dialog_choice_selection_system),
@@ -200,10 +217,16 @@ fn setup(
     let dialog = structured_dialog::DialogHandle(asset_server.load("dialog.json"));
     commands.insert_resource(dialog);
 
+    let player_y_start = -LANE_HEIGHT / 2.;
     commands
         .spawn((
             PlayerMarker,
+            Intersects::default(),
             PlayerCar {
+                aabb: Aabb2d {
+                    min: Vec2::new(-89. / 2., player_y_start + (-53. / 2.)),
+                    max: Vec2::new(89. / 2., player_y_start + (53. / 2.)),
+                },
                 speed_coeff: 0.,
                 timer: Timer::from_seconds(0.075, TimerMode::Repeating),
                 atlas_right: (0, 2),
@@ -468,6 +491,20 @@ fn setup(
         .insert(Transform::from_xyz(0., -320. + (0. * 75. * 1.5), 1.));
 }
 
+fn car_intersection_system(
+    player_car_query: Query<&PlayerCar>,
+    mut npc_car_query: Query<&mut Car>,
+) {
+    let player_car = player_car_query.single();
+    for mut npc_car in npc_car_query.iter_mut() {
+        if player_car.aabb.intersects(&npc_car.aabb) {
+            npc_car.intersects_player = true;
+        } else {
+            npc_car.intersects_player = false;
+        }
+    }
+}
+
 fn game_level_system(
     time: Res<Time>,
     mut player_data: ResMut<PlayerHealth>,
@@ -523,6 +560,29 @@ fn game_level_system(
     }
 }
 
+fn road_line_system(
+    time: Res<Time>,
+    mut road_query: Query<(&mut Transform), With<RoadMarker>>,
+    player_query: Query<(&Sprite, &PlayerCar), With<PlayerMarker>>,
+) {
+    let (player_sprite, player_car) = player_query.single();
+    let facing_left = player_sprite.flip_x;
+
+    for mut road_transform in road_query.iter_mut() {
+        if road_transform.translation.x > (WINDOW_X / 2.) + 42. {
+            road_transform.translation.x = -(WINDOW_X / 2.) - 42.
+        } else if road_transform.translation.x < -(WINDOW_X / 2.) - 42. {
+            road_transform.translation.x = (WINDOW_X / 2.) + 42.
+        }
+
+        if facing_left {
+            road_transform.translation.x += SPEED_X * player_car.speed_coeff * time.delta_secs();
+        } else {
+            road_transform.translation.x -= SPEED_X * player_car.speed_coeff * time.delta_secs();
+        }
+    }
+}
+
 fn keyboad_input_change_system(
     mut commands: Commands,
     assest_server: Res<AssetServer>,
@@ -533,20 +593,15 @@ fn keyboad_input_change_system(
     game_script_asset: Res<Assets<structured_dialog::GameScript>>,
     mut spawn_thing_timer: ResMut<SpawnThingTimer>,
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut road_query: Query<(&mut Transform), With<RoadMarker>>,
-    mut obstacle_query: Query<
-        (Entity, &mut Transform, &Car),
-        (
-            With<ObstacleMarker>,
-            Without<RoadMarker>,
-            Without<PlayerMarker>,
-        ),
+    mut car_query: Query<
+        (Entity, &mut Transform, &mut Car),
+        (With<CarMarker>, Without<RoadMarker>, Without<PlayerMarker>),
     >,
     mut person_query: Query<
         (Entity, &mut Transform),
         (
             With<PersonMarker>,
-            Without<ObstacleMarker>,
+            Without<CarMarker>,
             Without<RoadMarker>,
             Without<PlayerMarker>,
         ),
@@ -556,18 +611,14 @@ fn keyboad_input_change_system(
         (
             With<PersonHighlightMarker>,
             Without<PersonMarker>,
-            Without<ObstacleMarker>,
+            Without<CarMarker>,
             Without<RoadMarker>,
             Without<PlayerMarker>,
         ),
     >,
     mut player_query: Query<
         (&mut Transform, &mut Sprite, &mut PlayerCar),
-        (
-            With<PlayerMarker>,
-            Without<RoadMarker>,
-            Without<ObstacleMarker>,
-        ),
+        (With<PlayerMarker>, Without<RoadMarker>, Without<CarMarker>),
     >,
 
     mut taxi: ResMut<Taxi>,
@@ -592,9 +643,9 @@ fn keyboad_input_change_system(
     let up_just_pressed = keyboard.any_just_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
     let down_just_pressed = keyboard.any_just_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
 
-    let (mut player_transform, mut player_sprite, mut animation) = player_query.single_mut();
-    animation.timer.tick(time.delta());
-    if animation.speed_coeff == 0.0 {
+    let (mut player_transform, mut player_sprite, mut player_car) = player_query.single_mut();
+    player_car.timer.tick(time.delta());
+    if player_car.speed_coeff == 0.0 {
         if right {
             player_sprite.flip_x = false;
         }
@@ -607,13 +658,13 @@ fn keyboad_input_change_system(
     let facing_left = player_sprite.flip_x;
 
     let (atlas_min, atlas_max) = if facing_left {
-        animation.atlas_left
+        player_car.atlas_left
     } else {
-        animation.atlas_right
+        player_car.atlas_right
     };
 
-    if gas {
-        if animation.timer.just_finished() {
+    if player_car.speed_coeff > 0.0 {
+        if player_car.timer.just_finished() {
             if let Some(atlas) = &mut player_sprite.texture_atlas {
                 if atlas.index >= atlas_max {
                     atlas.index = atlas_min;
@@ -622,88 +673,86 @@ fn keyboad_input_change_system(
                 }
             }
         }
-        animation.speed_coeff = (animation.speed_coeff + (1. * time.delta_secs())).min(1.0);
     } else {
         if let Some(atlas) = &mut player_sprite.texture_atlas {
             atlas.index = atlas_min;
         }
-        animation.speed_coeff = (animation.speed_coeff - (1. * time.delta_secs())).max(0.0);
+    }
+    if gas {
+        player_car.speed_coeff = (player_car.speed_coeff + (1. * time.delta_secs())).min(1.0);
+    } else {
+        player_car.speed_coeff = (player_car.speed_coeff - (1. * time.delta_secs())).max(0.0);
     }
 
     if up_just_pressed && player_y < LANE_HEIGHT {
         player_transform.translation.y += LANE_HEIGHT;
+        player_car.aabb.translate_by(vec2(0.0, LANE_HEIGHT));
     }
     if down_just_pressed && player_y > -LANE_HEIGHT {
         player_transform.translation.y -= LANE_HEIGHT;
-    }
-
-    for mut road_transform in road_query.iter_mut() {
-        if road_transform.translation.x > (WINDOW_X / 2.) + 42. {
-            road_transform.translation.x = -(WINDOW_X / 2.) - 42.
-        } else if road_transform.translation.x < -(WINDOW_X / 2.) - 42. {
-            road_transform.translation.x = (WINDOW_X / 2.) + 42.
-        }
-
-        if facing_left {
-            road_transform.translation.x += SPEED_X * animation.speed_coeff * time.delta_secs();
-        } else {
-            road_transform.translation.x -= SPEED_X * animation.speed_coeff * time.delta_secs();
-        }
+        player_car.aabb.translate_by(vec2(0.0, -LANE_HEIGHT));
     }
 
     let mut allow_obstable_spawn = true;
-    for (obstable_entity, mut obstable_transform, car) in obstacle_query.iter_mut() {
-        let car_speed = car.speed;
+    for (obstable_entity, mut npc_car_transform, mut npc_car) in car_query.iter_mut() {
+        let car_speed = npc_car.speed;
 
-        if obstable_transform.translation.x > (WINDOW_X / 2.) + 200. {
+        if npc_car_transform.translation.x > (WINDOW_X / 2.) + 200. {
             commands.entity(obstable_entity).despawn();
-        } else if obstable_transform.translation.x < -(WINDOW_X / 2.) - 200. {
+        } else if npc_car_transform.translation.x < -(WINDOW_X / 2.) - 200. {
             commands.entity(obstable_entity).despawn();
         }
-        if gas {
-            if obstable_transform.translation.y > 0. {
-                //  car is going left
-                if facing_left {
-                    obstable_transform.translation.x +=
-                        (-0.5 + animation.speed_coeff) * car_speed * time.delta_secs();
+        if !npc_car.intersects_player {
+            if player_car.speed_coeff > 0.0 {
+                let slow_down_x_translation =
+                    (1. - 1.5 * player_car.speed_coeff) * car_speed * time.delta_secs();
+                let speed_up_x_translation =
+                    (1.0 + (1.5 * player_car.speed_coeff)) * car_speed * time.delta_secs();
+                if npc_car_transform.translation.y > 0. {
+                    //  car is going left
+                    if facing_left {
+                        npc_car_transform.translation.x -= slow_down_x_translation;
+                        npc_car
+                            .aabb
+                            .translate_by(Vec2::new(-slow_down_x_translation, 0.0));
+                    } else {
+                        npc_car_transform.translation.x -= speed_up_x_translation;
+                        npc_car
+                            .aabb
+                            .translate_by(Vec2::new(-speed_up_x_translation, 0.0));
+                    }
                 } else {
-                    obstable_transform.translation.x -=
-                        (1.0 + (2. * animation.speed_coeff)) * car_speed * time.delta_secs();
+                    // car is going right
+                    if facing_left {
+                        npc_car_transform.translation.x += speed_up_x_translation;
+                        npc_car
+                            .aabb
+                            .translate_by(Vec2::new(speed_up_x_translation, 0.0));
+                    } else {
+                        npc_car_transform.translation.x += slow_down_x_translation;
+                        npc_car
+                            .aabb
+                            .translate_by(Vec2::new(slow_down_x_translation, 0.0));
+                    }
                 }
             } else {
-                // car is going right
-                if facing_left {
-                    obstable_transform.translation.x +=
-                        (1.0 + (2. * animation.speed_coeff)) * car_speed * time.delta_secs();
+                let x_translation = car_speed * time.delta_secs();
+                if npc_car_transform.translation.y > 0. {
+                    npc_car_transform.translation.x -= x_translation;
+                    npc_car.aabb.translate_by(Vec2::new(-x_translation, 0.0));
                 } else {
-                    obstable_transform.translation.x -=
-                        (-0.5 + animation.speed_coeff) * car_speed * time.delta_secs();
+                    info!(x_translation);
+                    npc_car_transform.translation.x += x_translation;
+                    npc_car.aabb.translate_by(Vec2::new(x_translation, 0.0));
                 }
             }
         } else {
-            if obstable_transform.translation.y > 0. {
-                // car is going left
-                if facing_left {
-                    obstable_transform.translation.x -=
-                        car_speed * (1.0 - animation.speed_coeff) * time.delta_secs();
-                } else {
-                    obstable_transform.translation.x -=
-                        car_speed * (1.0 + (2.0 * animation.speed_coeff)) * time.delta_secs();
-                }
-            } else {
-                // car is going right
-                if facing_left {
-                    obstable_transform.translation.x +=
-                        car_speed * (1.0 + (2.0 * animation.speed_coeff)) * time.delta_secs();
-                } else {
-                    obstable_transform.translation.x +=
-                        car_speed * (1.0 - animation.speed_coeff) * time.delta_secs();
-                }
-            }
+            // Speed the player_car down to a stop
+            player_car.speed_coeff = (player_car.speed_coeff - (2. * time.delta_secs())).max(0.0);
         }
 
-        if obstable_transform.translation.x > (WINDOW_X / 2.) + 51. - 200.
-            && obstable_transform.translation.x < (WINDOW_X / 2.) + 51. + 200.
+        if npc_car_transform.translation.x > (WINDOW_X / 2.) + 51. - 200.
+            && npc_car_transform.translation.x < (WINDOW_X / 2.) + 51. + 200.
         {
             allow_obstable_spawn = false;
         }
@@ -749,7 +798,7 @@ fn keyboad_input_change_system(
                 .unwrap();
 
             if !info.completed {
-                travel.traveled += SPEED_X * animation.speed_coeff * time.delta_secs() / 1000.;
+                travel.traveled += SPEED_X * player_car.speed_coeff * time.delta_secs() / 1000.;
                 if travel.traveled > travel.distance {
                 } else {
                     // info!("Traveled {} km", travel.traveled);
@@ -760,14 +809,16 @@ fn keyboad_input_change_system(
                     if id == String::from("drop off soon") {
                         // info!("Clear 1");
                         dialog_message.dialog = None
-                    } else if animation.speed_coeff > 0.0 {
+                    } else if player_car.speed_coeff > 0.0 {
                         dialog_message.dialog = Some(game_script.dialogs[2].clone());
                     } else if can_drop_off
-                        && animation.speed_coeff == 0.0
+                        && player_car.speed_coeff == 0.0
                         && id == String::from("here")
                     {
                         dialog_message.dialog = None;
-                    } else if can_drop_off && animation.speed_coeff == 0.0 && id == String::from("")
+                    } else if can_drop_off
+                        && player_car.speed_coeff == 0.0
+                        && id == String::from("")
                     {
                         // SUCCESSFUL DROP OFF
                         info!("Show bye message");
@@ -799,7 +850,7 @@ fn keyboad_input_change_system(
 
             match closest_persons {
                 Some((closest_rider_entity, _, _)) => {
-                    if animation.speed_coeff == 0.0 {
+                    if player_car.speed_coeff == 0.0 {
                         let rider = taxi.rides.iter().find(|r| r.who == closest_rider_entity);
                         let mut rng = rand::thread_rng();
                         let show_dialog = match rider {
@@ -843,9 +894,9 @@ fn keyboad_input_change_system(
         }
 
         if facing_left {
-            person_transform.translation.x += SPEED_X * animation.speed_coeff * time.delta_secs();
+            person_transform.translation.x += SPEED_X * player_car.speed_coeff * time.delta_secs();
         } else {
-            person_transform.translation.x -= SPEED_X * animation.speed_coeff * time.delta_secs();
+            person_transform.translation.x -= SPEED_X * player_car.speed_coeff * time.delta_secs();
         }
     }
 
@@ -918,9 +969,15 @@ fn keyboad_input_change_system(
         if random_bool_one_in_n(1) && allow_obstable_spawn {
             commands
                 .spawn((
-                    ObstacleMarker,
+                    CarMarker,
+                    Intersects::default(),
                     Car {
+                        aabb: Aabb2d {
+                            min: Vec2::new(x + (-89. / 2.), y + (-53. / 2.)),
+                            max: Vec2::new(x + (89. / 2.), y + (53. / 2.)),
+                        },
                         speed: rng.gen_range(200.0..290.0),
+                        intersects_player: false,
                     },
                     Sprite {
                         flip_x: flip_x,
