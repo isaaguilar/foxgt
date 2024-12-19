@@ -25,6 +25,7 @@ const WINDOW_Y: f32 = 480.;
 const WINDOW_X: f32 = 640.;
 const SPEED_X: f32 = 300.;
 const LANE_HEIGHT: f32 = 70.;
+const HALF_CAR_WIDTH: f32 = 89. / 2.;
 
 #[derive(Resource, Deref, DerefMut)]
 pub struct DisplayLanguage(pub &'static str);
@@ -66,7 +67,10 @@ pub struct Ride {
     pub distance: f32,
     pub completed: bool,
     pub trip_cost: f32,
+    pub tip_percentage: f32,
     pub tip: f32,
+    pub distance_past_dropoff: f32,
+    pub trip_time: f32,
 }
 
 #[derive(Resource)]
@@ -83,7 +87,7 @@ pub struct SpawnThingTimer {
     timer: Timer,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct PlayerHealth {
     pub level: f32,
     pub total_earnings: f32,
@@ -92,6 +96,20 @@ pub struct PlayerHealth {
     pub time_limit_required_earnings: f32,
     pub time_limit: Timer,
     pub cycles_completed: u32,
+}
+
+impl Default for PlayerHealth {
+    fn default() -> Self {
+        Self {
+            time_limit_required_earnings: 50.,
+            time_limit: Timer::from_seconds(60., TimerMode::Once),
+            level: 0.0,
+            total_earnings: 0.0,
+            spent: 0.0,
+            earnings: 0.0,
+            cycles_completed: 0,
+        }
+    }
 }
 
 #[derive(Resource, Default)]
@@ -155,12 +173,9 @@ fn main() {
             }),
             JsonAssetPlugin::<structured_dialog::GameScript>::new(&[".json"]),
         ))
+        .insert_resource(ResetGame(false))
         .insert_resource(Travel::default())
-        .insert_resource(PlayerHealth {
-            time_limit_required_earnings: 50.,
-            time_limit: Timer::from_seconds(60.0, TimerMode::Once),
-            ..default()
-        })
+        .insert_resource(PlayerHealth::default())
         .insert_resource(Taxi { ..default() })
         .insert_resource(CurrentSelection(String::new()))
         .insert_resource(InteractionRateLimit(Timer::from_seconds(
@@ -169,7 +184,7 @@ fn main() {
         )))
         .insert_resource(OccuredEvents(vec![]))
         .insert_resource(Posessions(vec![]))
-        .insert_resource(DisplayLanguage("english"))
+        .insert_resource(DisplayLanguage("spanish"))
         .insert_resource(structured_dialog::DialogMessage {
             selection_index: 1,
             ..default()
@@ -194,7 +209,7 @@ fn main() {
         )
         .add_systems(
             Update,
-            (dialog_display_system, dialog_choice_selection_system),
+            (reset, dialog_display_system, dialog_choice_selection_system),
         )
         .run();
 }
@@ -226,8 +241,8 @@ fn setup(
             Intersects::default(),
             PlayerCar {
                 aabb: Aabb2d {
-                    min: Vec2::new(-89. / 2., player_y_start + (-53. / 2.)),
-                    max: Vec2::new(89. / 2., player_y_start + (53. / 2.)),
+                    min: Vec2::new(-HALF_CAR_WIDTH, player_y_start + (-53. / 2.)),
+                    max: Vec2::new(HALF_CAR_WIDTH, player_y_start + (53. / 2.)),
                 },
                 speed_coeff: 0.,
                 timer: Timer::from_seconds(0.075, TimerMode::Repeating),
@@ -494,13 +509,35 @@ fn setup(
 }
 
 fn car_intersection_system(
-    player_car_query: Query<&PlayerCar>,
+    player_car_query: Query<(&Sprite, &PlayerCar)>,
     mut npc_car_query: Query<(Entity, &mut Car)>,
 ) {
-    let player_car = player_car_query.single();
+    let (player_sprite, player_car) = player_car_query.single();
+    let facing_left = player_sprite.flip_x;
+
     for (_, mut npc_car) in npc_car_query.iter_mut() {
         if player_car.aabb.intersects(&npc_car.aabb) {
-            npc_car.intersects_player = true;
+            if npc_car.aabb.min.y > 0. {
+                if npc_car.aabb.min.x > 0. {
+                    npc_car.intersects_player = true;
+                } else if facing_left {
+                    npc_car.intersects_player = true;
+                } else if !facing_left && npc_car.aabb.max.x > HALF_CAR_WIDTH / 4. {
+                    npc_car.intersects_player = true;
+                } else {
+                    npc_car.intersects_player = false;
+                }
+            } else {
+                if npc_car.aabb.max.x < 0. {
+                    npc_car.intersects_player = true;
+                } else if !facing_left {
+                    npc_car.intersects_player = true;
+                } else if facing_left && npc_car.aabb.min.x < HALF_CAR_WIDTH / 4. {
+                    npc_car.intersects_player = true;
+                } else {
+                    npc_car.intersects_player = false;
+                }
+            }
         } else {
             npc_car.intersects_player = false;
         }
@@ -522,7 +559,7 @@ fn car_intersection_system(
     npc_car_query.iter_mut().for_each(|(entity, mut npc_car)| {
         if entitys_intersected.contains(&entity) {
             npc_car.intersects_npc = true;
-            info!("NPCs intersected");
+            // info!("NPCs intersected");
         }
     });
 }
@@ -565,12 +602,20 @@ fn game_level_system(
 
     if player_data.time_limit.just_finished() {
         if player_data.earnings > player_data.time_limit_required_earnings {
-            let x = player_data.cycles_completed as f32;
-            // simple for now, but quickly will becomes impossible
-            player_data.time_limit_required_earnings = 0.1 * x.powi(2) + 0.5 * x + 50.;
+            player_data.cycles_completed += 1;
             player_data.time_limit.reset();
             player_data.earnings = 0.0;
-            player_data.cycles_completed += 1;
+
+            let x = if player_data.cycles_completed < 10 {
+                (player_data.cycles_completed as f32) * 2. / 100.
+            } else if player_data.cycles_completed < 30 {
+                0.2 + (player_data.cycles_completed as f32) * 2. / 1000.
+            } else {
+                0.258
+            };
+
+            info!("{}", 1. + x);
+            player_data.time_limit_required_earnings = (49.0_f32.powf(1. + x)).ceil();
         } else {
             let game_over = game_script
                 .dialogs
@@ -584,9 +629,16 @@ fn game_level_system(
 
 fn road_line_system(
     time: Res<Time>,
+    dialog_message: Res<structured_dialog::DialogMessage>,
     mut road_query: Query<(&mut Transform), With<RoadMarker>>,
     player_query: Query<(&Sprite, &PlayerCar), With<PlayerMarker>>,
 ) {
+    if let Some(dialog) = &dialog_message.dialog {
+        if dialog.choices.is_some() {
+            return;
+        }
+    }
+
     let (player_sprite, player_car) = player_query.single();
     let facing_left = player_sprite.flip_x;
 
@@ -717,14 +769,29 @@ fn keyboad_input_change_system(
 
     let mut allow_obstable_spawn = true;
     for (obstable_entity, mut npc_car_transform, mut npc_car) in car_query.iter_mut() {
-        let car_speed = npc_car.speed;
-
         if npc_car_transform.translation.x > (WINDOW_X / 2.) + 200. {
             commands.entity(obstable_entity).despawn();
         } else if npc_car_transform.translation.x < -(WINDOW_X / 2.) - 200. {
             commands.entity(obstable_entity).despawn();
         }
-        if !npc_car.intersects_player {
+
+        // TODO if player_car faces the other way it should be able to "detach" and un-intersect
+
+        if npc_car.intersects_npc && !npc_car.intersects_player {
+            let player_translation_speed = SPEED_X * player_car.speed_coeff * time.delta_secs();
+            if facing_left {
+                npc_car_transform.translation.x += player_translation_speed;
+                npc_car
+                    .aabb
+                    .translate_by(Vec2::new(player_translation_speed, 0.0));
+            } else {
+                npc_car_transform.translation.x -= player_translation_speed;
+                npc_car
+                    .aabb
+                    .translate_by(Vec2::new(-player_translation_speed, 0.0));
+            }
+        } else if !npc_car.intersects_player {
+            let car_speed = npc_car.speed;
             if player_car.speed_coeff > 0.0 {
                 let slow_down_x_translation =
                     (1. - 1.5 * player_car.speed_coeff) * car_speed * time.delta_secs();
@@ -821,10 +888,8 @@ fn keyboad_input_change_system(
 
             if !info.completed {
                 travel.traveled += SPEED_X * player_car.speed_coeff * time.delta_secs() / 1000.;
-                if travel.traveled > travel.distance {
-                } else {
-                    // info!("Traveled {} km", travel.traveled);
-                }
+
+                info.trip_time += time.delta_secs_f64() as f32;
 
                 if travel.traveled > travel.distance {
                     let id = current_dialog_id.unwrap_or_default();
@@ -833,6 +898,9 @@ fn keyboad_input_change_system(
                         dialog_message.dialog = None
                     } else if player_car.speed_coeff > 0.0 {
                         dialog_message.dialog = Some(game_script.dialogs[2].clone());
+                        info.distance_past_dropoff +=
+                            SPEED_X * player_car.speed_coeff * time.delta_secs() / 1000.;
+                        info!("{}", info.distance_past_dropoff);
                     } else if can_drop_off
                         && player_car.speed_coeff == 0.0
                         && id == String::from("here")
@@ -844,6 +912,56 @@ fn keyboad_input_change_system(
                     {
                         // SUCCESSFUL DROP OFF
                         info!("Show bye message");
+                        let distance_based_tip_adjustment = if info.distance_past_dropoff < 0.25 {
+                            3.5
+                        } else if info.distance_past_dropoff < 0.5 {
+                            0.5
+                        } else if info.distance_past_dropoff < 0.75 {
+                            -2.0
+                        } else if info.distance_past_dropoff < 1.75 {
+                            -4.0
+                        } else if info.distance_past_dropoff < 2.0 {
+                            -6.0
+                        } else if info.distance_past_dropoff < 3.0 {
+                            -8.0
+                        } else {
+                            -10.
+                        };
+
+                        // Fastest time (nearly) possible
+                        let fastest = info.distance * 1000. / SPEED_X;
+                        let time_ratio = info.trip_time / fastest;
+                        let time_past_dropoff = info.trip_time - fastest;
+                        let time_ratio_based_tip_adjustment = if time_ratio < 1.1 {
+                            4.0
+                        } else if time_ratio < 1.2 {
+                            2.5
+                        } else if time_ratio < 1.3 {
+                            0.5
+                        } else if time_ratio < 1.4 {
+                            -1.0
+                        } else if time_ratio < 1.5 {
+                            -3.0
+                        } else if time_ratio < 1.6 {
+                            -6.0
+                        } else {
+                            -10.
+                        };
+
+                        let time_past_dropoff_tip_adjustment = 1.0 - time_past_dropoff;
+
+                        //
+
+                        info.tip_percentage += distance_based_tip_adjustment
+                            + time_ratio_based_tip_adjustment
+                            + time_past_dropoff_tip_adjustment;
+
+                        info!("{}", info.tip_percentage);
+
+                        info.tip = (info.trip_cost * (info.tip_percentage / 100.))
+                            .max(0.0)
+                            .floor();
+
                         player_data.earnings += info.trip_cost + info.tip;
                         player_data.total_earnings += info.trip_cost + info.tip;
                         dialog_message.dialog = Some(game_script.dialogs[3].clone());
@@ -875,7 +993,7 @@ fn keyboad_input_change_system(
                     if player_car.speed_coeff == 0.0 {
                         let rider = taxi.rides.iter().find(|r| r.who == closest_rider_entity);
                         let mut rng = rand::thread_rng();
-                        let show_dialog = match rider {
+                        let accepted_job = match rider {
                             Some(rider) => match rider.accepted {
                                 Some(b) => b,
                                 None => true,
@@ -890,12 +1008,16 @@ fn keyboad_input_change_system(
                                     distance: ((d * 100.) as f32).round() / 100.,
                                     completed: false,
                                     trip_cost: ((d * 7.) as f32).ceil(),
+                                    tip_percentage: 10.0,
                                     tip: 0.0,
+                                    distance_past_dropoff: 0.0,
+                                    trip_time: 0.0,
                                 });
                                 true
                             }
                         };
-                        if show_dialog {
+                        if accepted_job {
+                            commands.entity(closest_rider_entity).despawn_recursive();
                             dialog_message.dialog = Some(game_script.dialogs[0].clone());
                         }
                         // info!("Show the dialog!");
@@ -1162,6 +1284,28 @@ pub fn dialog_display_system(
     return;
 }
 
+pub fn reset(
+    mut reset_game: ResMut<ResetGame>,
+    mut dialog_message: ResMut<structured_dialog::DialogMessage>,
+    mut travel: ResMut<Travel>,
+    mut player_data: ResMut<PlayerHealth>,
+    mut taxi: ResMut<Taxi>,
+
+    mut current_selection: ResMut<CurrentSelection>,
+) {
+    if reset_game.0 {
+        reset_game.0 = false;
+        dialog_message.dialog = None;
+        *travel = Travel::default();
+        *player_data = PlayerHealth::default();
+        *taxi = Taxi::default();
+        current_selection.0 = String::new();
+    }
+}
+
+#[derive(Resource)]
+pub struct ResetGame(bool);
+
 pub fn dialog_choice_selection_system(
     mut commands: Commands,
     time: Res<Time>,
@@ -1176,6 +1320,7 @@ pub fn dialog_choice_selection_system(
     // not consistent with regular dialog
     mut travel: ResMut<Travel>,
     mut taxi: ResMut<Taxi>,
+    mut reset_game: ResMut<ResetGame>,
 ) {
     let up_key_pressed = keyboard_input.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
     let down_key_pressed = keyboard_input.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
@@ -1200,6 +1345,7 @@ pub fn dialog_choice_selection_system(
 
     if enter_key_just_pressed {
         if current_selection.0 == "play again" {
+            reset_game.0 = true;
             return;
         }
         dialog_message.dialog = None;

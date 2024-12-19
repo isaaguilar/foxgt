@@ -134,8 +134,8 @@
                     "choice": "play again",
                     "dialog": {
                         "language": {
-                            "english": "...",
-                            "spanish": "..."
+                            "english": "Reset",
+                            "spanish": "Reset"
                         },
                         "actions": {
                             "events_changed_on_enter": [],
