@@ -133,6 +133,9 @@ pub struct RoadMarker;
 #[derive(Component)]
 pub struct CarMarker;
 
+#[derive(Component)]
+pub struct PersonInCarMarker;
+
 #[derive(Component, Clone)]
 pub struct Car {
     pub aabb: Aabb2d,
@@ -509,7 +512,7 @@ fn setup(
                 Node {
                     // background_color: BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
                     width: Val::Px(100.),
-                    left: Val::Px(400.),
+                    left: Val::Px(500.),
                     position_type: PositionType::Absolute,
                     // align_items: AlignItems::Start,
                     padding: UiRect {
@@ -522,20 +525,29 @@ fn setup(
                 },
             ))
             .with_children(|p| {
-                p.spawn((ImageNode {
-                    image: asset_server.load("person-Sheet.png"),
-                    texture_atlas: Some(TextureAtlas {
-                        layout: texture_atlas_layouts.add(TextureAtlasLayout::from_grid(
-                            UVec2::new(9, 22),
-                            27,
-                            1,
-                            None,
-                            None,
-                        )),
-                        index: 1,
-                    }),
-                    ..default()
-                },));
+                p.spawn((
+                    PersonInCarMarker,
+                    Node {
+                        width: Val::Px(9. * 3.),
+                        height: Val::Px(22. * 3.),
+                        ..default()
+                    },
+                    BackgroundColor(Color::WHITE),
+                    ImageNode {
+                        image: asset_server.load("person-Sheet.png"),
+                        texture_atlas: Some(TextureAtlas {
+                            layout: texture_atlas_layouts.add(TextureAtlasLayout::from_grid(
+                                UVec2::new(9, 22),
+                                28,
+                                1,
+                                None,
+                                None,
+                            )),
+                            index: 27,
+                        }),
+                        ..default()
+                    },
+                ));
             });
         });
 
@@ -606,10 +618,12 @@ fn car_intersection_system(
 
 fn game_level_system(
     time: Res<Time>,
+    taxi: Res<Taxi>,
     mut player_data: ResMut<PlayerHealth>,
     mut dialog_message: ResMut<structured_dialog::DialogMessage>,
     game_script_asset: Res<Assets<structured_dialog::GameScript>>,
     mut ui_element_query: Query<(&UiElement, &mut TextSpan)>,
+    mut ui_person_in_car_query: Query<&mut ImageNode, With<PersonInCarMarker>>,
 ) {
     match &dialog_message.dialog {
         Some(dialog) => match dialog.choices {
@@ -617,6 +631,25 @@ fn game_level_system(
             None => {}
         },
         None => {}
+    }
+
+    let current_rider = taxi.current_rider;
+    let index = if let Some(info) = taxi.rides.iter().find(|ride| {
+        if let Some(who) = current_rider {
+            ride.who == who
+        } else {
+            false
+        }
+    }) {
+        info.passenger.sprite_index
+    } else {
+        27
+    };
+
+    for mut ui_person_in_car in ui_person_in_car_query.iter_mut() {
+        if let Some(atlas) = &mut ui_person_in_car.texture_atlas {
+            atlas.index = index;
+        }
     }
 
     let game_script = match game_script_asset.iter().next() {
@@ -1154,31 +1187,33 @@ fn keyboad_input_change_system(
             ))
             .insert(Transform::from_xyz(x, y, 0.))
             .with_children(|commands| {
-                commands
-                    .spawn(Sprite {
-                        image: assest_server.load("player-outline.png"),
-                        ..default()
-                    })
-                    .insert(Passenger {
-                        name: passenger_name.clone(),
-                        sprite_index: sprite_index,
-                    })
-                    .insert(PersonHighlightMarker)
-                    .insert(Transform::from_xyz(0., 0., -1.))
-                    .insert(Visibility::Hidden);
-                let y = 30.;
-                commands
-                    .spawn(Sprite {
-                        image: assest_server.load("exclaimation.png"),
-                        ..default()
-                    })
-                    .insert(Passenger {
-                        name: passenger_name.clone(),
-                        sprite_index: sprite_index,
-                    })
-                    .insert(PersonHighlightMarker)
-                    .insert(Transform::from_xyz(0., y, -1.))
-                    .insert(Visibility::Hidden);
+                if random_bool_one_in_n(5) {
+                    commands
+                        .spawn(Sprite {
+                            image: assest_server.load("player-outline.png"),
+                            ..default()
+                        })
+                        .insert(Passenger {
+                            name: passenger_name.clone(),
+                            sprite_index: sprite_index,
+                        })
+                        .insert(PersonHighlightMarker)
+                        .insert(Transform::from_xyz(0., 0., -1.))
+                        .insert(Visibility::Hidden);
+                    let y = 30.;
+                    commands
+                        .spawn(Sprite {
+                            image: assest_server.load("exclaimation.png"),
+                            ..default()
+                        })
+                        .insert(Passenger {
+                            name: passenger_name.clone(),
+                            sprite_index: sprite_index,
+                        })
+                        .insert(PersonHighlightMarker)
+                        .insert(Transform::from_xyz(0., y, -1.))
+                        .insert(Visibility::Hidden);
+                }
             });
 
         let y = if random_bool_one_in_n(2) {
