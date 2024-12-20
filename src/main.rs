@@ -44,6 +44,12 @@ pub struct InteractionAvailable;
 #[derive(Component)]
 pub struct DialogTextboxChoiceMarker;
 
+#[derive(Component, Clone)]
+pub struct Passenger {
+    name: String,
+    sprite_index: usize,
+}
+
 #[derive(Resource)]
 pub struct InteractionRateLimit(pub Timer);
 
@@ -62,7 +68,7 @@ pub struct Taxi {
 
 pub struct Ride {
     pub who: Entity,
-    pub name: String,
+    pub passenger: Passenger,
     pub accepted: Option<bool>,
     pub distance: f32,
     pub completed: bool,
@@ -497,6 +503,40 @@ fn setup(
                         ));
                     });
             });
+
+            p.spawn((
+                // BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
+                Node {
+                    // background_color: BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
+                    width: Val::Px(100.),
+                    left: Val::Px(400.),
+                    position_type: PositionType::Absolute,
+                    // align_items: AlignItems::Start,
+                    padding: UiRect {
+                        left: Val::Percent(1.),
+                        right: Val::Percent(1.),
+                        top: Val::Percent(1.),
+                        bottom: Val::Percent(0.),
+                    },
+                    ..default()
+                },
+            ))
+            .with_children(|p| {
+                p.spawn((ImageNode {
+                    image: asset_server.load("person-Sheet.png"),
+                    texture_atlas: Some(TextureAtlas {
+                        layout: texture_atlas_layouts.add(TextureAtlasLayout::from_grid(
+                            UVec2::new(9, 22),
+                            27,
+                            1,
+                            None,
+                            None,
+                        )),
+                        index: 1,
+                    }),
+                    ..default()
+                },));
+            });
         });
 
     commands
@@ -672,7 +712,7 @@ fn keyboad_input_change_system(
         (With<CarMarker>, Without<RoadMarker>, Without<PlayerMarker>),
     >,
     mut person_query: Query<
-        (Entity, &mut Transform),
+        (Entity, &mut Transform, &Passenger),
         (
             With<PersonMarker>,
             Without<CarMarker>,
@@ -681,7 +721,7 @@ fn keyboad_input_change_system(
         ),
     >,
     mut person_highlight_query: Query<
-        (Entity, &mut GlobalTransform, &mut Visibility),
+        (Entity, &mut GlobalTransform, &mut Visibility, &Passenger),
         (
             With<PersonHighlightMarker>,
             Without<PersonMarker>,
@@ -855,7 +895,7 @@ fn keyboad_input_change_system(
         false
     };
 
-    for (person_entity, mut person_global_transform, mut visibility) in
+    for (person_entity, mut person_global_transform, mut visibility, _) in
         person_highlight_query.iter_mut()
     {
         let global_transform = person_global_transform.compute_transform();
@@ -885,6 +925,13 @@ fn keyboad_input_change_system(
                 .iter_mut()
                 .find(|ride| ride.who == current_rider)
                 .unwrap();
+
+            for (entity, _, _) in person_query
+                .iter_mut()
+                .filter(|(_, _, passenger)| passenger.name == info.passenger.name)
+            {
+                commands.entity(entity).despawn_recursive();
+            }
 
             if !info.completed {
                 travel.traveled += SPEED_X * player_car.speed_coeff * time.delta_secs() / 1000.;
@@ -965,6 +1012,31 @@ fn keyboad_input_change_system(
                         player_data.earnings += info.trip_cost + info.tip;
                         player_data.total_earnings += info.trip_cost + info.tip;
                         dialog_message.dialog = Some(game_script.dialogs[3].clone());
+
+                        let y = if player_y > 0. { 170. } else { -190. };
+                        commands
+                            .spawn((
+                                PersonMarker,
+                                info.passenger.clone(),
+                                Sprite {
+                                    flip_x: false,
+                                    texture_atlas: Some(TextureAtlas {
+                                        layout: texture_atlas_layouts.add(
+                                            TextureAtlasLayout::from_grid(
+                                                UVec2::new(9, 22),
+                                                27,
+                                                1,
+                                                None,
+                                                None,
+                                            ),
+                                        ),
+                                        index: info.passenger.sprite_index,
+                                    }),
+                                    image: assest_server.load("person-Sheet.png"),
+                                    ..default()
+                                },
+                            ))
+                            .insert(Transform::from_xyz(player_x, y, 0.));
                         info.completed = true;
                     } else {
                         // taxi.current_rider = None;
@@ -981,7 +1053,7 @@ fn keyboad_input_change_system(
         None => {
             let closest_persons = person_highlight_query
                 .iter()
-                .filter(|(_, transform, visiblility)| {
+                .filter(|(_, transform, visiblility, _)| {
                     let global_transform = transform.compute_transform();
                     global_transform.translation.x.abs() <= 50.
                         && *visiblility == Visibility::Visible
@@ -989,7 +1061,7 @@ fn keyboad_input_change_system(
                 .next();
 
             match closest_persons {
-                Some((closest_rider_entity, _, _)) => {
+                Some((closest_rider_entity, _, _, closest_passenger)) => {
                     if player_car.speed_coeff == 0.0 {
                         let rider = taxi.rides.iter().find(|r| r.who == closest_rider_entity);
                         let mut rng = rand::thread_rng();
@@ -1001,9 +1073,10 @@ fn keyboad_input_change_system(
                             None => {
                                 let d = rng.gen_range(0.25..=10.0);
                                 taxi.closest_person = Some(closest_rider_entity);
+
                                 taxi.rides.push(Ride {
                                     who: closest_rider_entity,
-                                    name: names::name(),
+                                    passenger: closest_passenger.clone(),
                                     accepted: None,
                                     distance: ((d * 100.) as f32).round() / 100.,
                                     completed: false,
@@ -1017,7 +1090,6 @@ fn keyboad_input_change_system(
                             }
                         };
                         if accepted_job {
-                            commands.entity(closest_rider_entity).despawn_recursive();
                             dialog_message.dialog = Some(game_script.dialogs[0].clone());
                         }
                         // info!("Show the dialog!");
@@ -1030,7 +1102,7 @@ fn keyboad_input_change_system(
         }
     }
 
-    for (person_entity, mut person_transform) in person_query.iter_mut() {
+    for (person_entity, mut person_transform, _) in person_query.iter_mut() {
         if person_transform.translation.x > (WINDOW_X / 2.) + 200. {
             commands.entity(person_entity).despawn_recursive();
         } else if person_transform.translation.x < -(WINDOW_X / 2.) - 200. {
@@ -1054,10 +1126,16 @@ fn keyboad_input_change_system(
             -(WINDOW_X / 2.) - 51.
         };
 
+        let passenger_name = names::name();
+        let sprite_index = rng.gen_range(0..27);
         // code to spawn goes here
         commands
             .spawn((
                 PersonMarker,
+                Passenger {
+                    name: passenger_name.clone(),
+                    sprite_index: sprite_index,
+                },
                 Sprite {
                     flip_x: false,
                     texture_atlas: Some(TextureAtlas {
@@ -1068,7 +1146,7 @@ fn keyboad_input_change_system(
                             None,
                             None,
                         )),
-                        index: rng.gen_range(0..27),
+                        index: sprite_index.clone(),
                     }),
                     image: assest_server.load("person-Sheet.png"),
                     ..default()
@@ -1081,6 +1159,10 @@ fn keyboad_input_change_system(
                         image: assest_server.load("player-outline.png"),
                         ..default()
                     })
+                    .insert(Passenger {
+                        name: passenger_name.clone(),
+                        sprite_index: sprite_index,
+                    })
                     .insert(PersonHighlightMarker)
                     .insert(Transform::from_xyz(0., 0., -1.))
                     .insert(Visibility::Hidden);
@@ -1089,6 +1171,10 @@ fn keyboad_input_change_system(
                     .spawn(Sprite {
                         image: assest_server.load("exclaimation.png"),
                         ..default()
+                    })
+                    .insert(Passenger {
+                        name: passenger_name.clone(),
+                        sprite_index: sprite_index,
                     })
                     .insert(PersonHighlightMarker)
                     .insert(Transform::from_xyz(0., y, -1.))
@@ -1232,7 +1318,7 @@ pub fn dialog_display_system(
 
                         let text = if let Some(current_rider) = taxi.closest_person {
                             if let Some(info) = taxi.rides.iter().find(|r| r.who == current_rider) {
-                                text.replace("{person}", &info.name)
+                                text.replace("{person}", &info.passenger.name)
                                     .replace("{distance}", &info.distance.to_string())
                                     .replace("{price}", &info.trip_cost.to_string())
                                     .replace("{tip}", &info.tip.to_string())
