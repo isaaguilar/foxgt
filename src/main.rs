@@ -177,7 +177,7 @@ fn main() {
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "Taxi GT".to_string(),
+                    title: "TaxiGT".to_string(),
                     resolution: (WINDOW_X, WINDOW_Y).into(),
                     visible: true,
                     ..default()

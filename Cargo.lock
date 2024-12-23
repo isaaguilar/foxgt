@@ -3728,6 +3728,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "taxigt"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_common_assets",
+ "rand",
+ "serde",
+]
+
+[[package]]
 name = "termcolor"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3892,16 +3902,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "trijam-300"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "bevy_common_assets",
- "rand",
- "serde",
 ]
 
 [[package]]
