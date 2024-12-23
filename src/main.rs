@@ -26,6 +26,8 @@ const WINDOW_X: f32 = 640.;
 const SPEED_X: f32 = 300.;
 const LANE_HEIGHT: f32 = 70.;
 const HALF_CAR_WIDTH: f32 = 89. / 2.;
+const PERSON_Y_TOP: f32 = 160.;
+const PERSON_Y_BOTTOM: f32 = -160.;
 
 #[derive(Resource, Deref, DerefMut)]
 pub struct DisplayLanguage(pub &'static str);
@@ -102,6 +104,7 @@ pub struct PlayerHealth {
     pub time_limit_required_earnings: f32,
     pub time_limit: Timer,
     pub cycles_completed: u32,
+    pub distance_traveled: f32,
 }
 
 impl Default for PlayerHealth {
@@ -114,6 +117,7 @@ impl Default for PlayerHealth {
             spent: 0.0,
             earnings: 0.0,
             cycles_completed: 0,
+            distance_traveled: 0.0,
         }
     }
 }
@@ -951,6 +955,8 @@ fn keyboad_input_change_system(
         };
     }
 
+    player_data.distance_traveled += SPEED_X * player_car.speed_coeff * time.delta_secs() / 1000.;
+
     match taxi.current_rider {
         Some(current_rider) => {
             let info = taxi
@@ -1046,7 +1052,11 @@ fn keyboad_input_change_system(
                         player_data.total_earnings += info.trip_cost + info.tip;
                         dialog_message.dialog = Some(game_script.dialogs[3].clone());
 
-                        let y = if player_y > 0. { 170. } else { -190. };
+                        let y = if player_y > 0. {
+                            PERSON_Y_TOP
+                        } else {
+                            PERSON_Y_BOTTOM
+                        };
                         commands
                             .spawn((
                                 PersonMarker,
@@ -1152,7 +1162,11 @@ fn keyboad_input_change_system(
     spawn_thing_timer.timer.tick(time.delta());
     if spawn_thing_timer.timer.just_finished() {
         let mut rng = rand::thread_rng();
-        let y = if random_bool_one_in_n(2) { 170. } else { -190. };
+        let y = if random_bool_one_in_n(2) {
+            PERSON_Y_TOP
+        } else {
+            PERSON_Y_BOTTOM
+        };
         let x = if random_bool_one_in_n(2) {
             (WINDOW_X / 2.) + 51.
         } else {
@@ -1271,6 +1285,7 @@ pub fn dialog_display_system(
 
     // not consistent with regular dialog
     taxi: Res<Taxi>,
+    player_data: Res<PlayerHealth>,
 ) {
     let dialog = match &dialog_message.dialog {
         Some(d) => d,
@@ -1360,6 +1375,24 @@ pub fn dialog_display_system(
                             } else {
                                 text.clone()
                             }
+                        } else {
+                            text.clone()
+                        };
+
+                        let text = if dialog.id == "game over" {
+                            let level = player_data.cycles_completed + 1;
+                            let total_collected = player_data.total_earnings;
+                            let rides_completed = taxi
+                                .rides
+                                .iter()
+                                .filter(|r| r.completed)
+                                .fold(0, |acc, _| acc + 1);
+                            let total_distance =
+                                (player_data.distance_traveled * 100.).round() / 100.;
+                            text.replace("{level}", &level.to_string())
+                                .replace("{total_collected}", &total_collected.to_string())
+                                .replace("{rides_completed}", &rides_completed.to_string())
+                                .replace("{total_distance}", &total_distance.to_string())
                         } else {
                             text.clone()
                         };
