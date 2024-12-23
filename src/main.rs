@@ -146,6 +146,7 @@ pub struct Car {
     pub speed: f32,
     pub intersects_player: bool,
     pub intersects_npc: bool,
+    pub blocks_player_movement: bool,
 }
 
 #[derive(Component)]
@@ -576,26 +577,43 @@ fn car_intersection_system(
             if npc_car.aabb.min.y > 0. {
                 if npc_car.aabb.min.x > 0. {
                     npc_car.intersects_player = true;
+                    if facing_left {
+                        npc_car.blocks_player_movement = false;
+                    } else {
+                        npc_car.blocks_player_movement = true;
+                    }
                 } else if facing_left {
                     npc_car.intersects_player = true;
+                    npc_car.blocks_player_movement = true;
                 } else if !facing_left && npc_car.aabb.max.x > HALF_CAR_WIDTH / 4. {
                     npc_car.intersects_player = true;
+                    npc_car.blocks_player_movement = true;
                 } else {
                     npc_car.intersects_player = false;
+                    npc_car.blocks_player_movement = false;
                 }
             } else {
                 if npc_car.aabb.max.x < 0. {
                     npc_car.intersects_player = true;
+                    if !facing_left {
+                        npc_car.blocks_player_movement = false;
+                    } else {
+                        npc_car.blocks_player_movement = true;
+                    }
                 } else if !facing_left {
                     npc_car.intersects_player = true;
+                    npc_car.blocks_player_movement = true;
                 } else if facing_left && npc_car.aabb.min.x < HALF_CAR_WIDTH / 4. {
                     npc_car.intersects_player = true;
+                    npc_car.blocks_player_movement = true;
                 } else {
                     npc_car.intersects_player = false;
+                    npc_car.blocks_player_movement = false;
                 }
             }
         } else {
             npc_car.intersects_player = false;
+            npc_car.blocks_player_movement = false;
         }
     }
 
@@ -854,7 +872,11 @@ fn keyboad_input_change_system(
 
         // TODO if player_car faces the other way it should be able to "detach" and un-intersect
 
-        if npc_car.intersects_npc && !npc_car.intersects_player {
+        if (npc_car.intersects_npc && !npc_car.intersects_player)
+            || (npc_car.intersects_player && !npc_car.blocks_player_movement)
+        {
+            // This looks like a car accident that brings that cars to a stop and on the road.
+            // The player will pass these accidents at the same speed as the car moves along the road.
             let player_translation_speed = SPEED_X * player_car.speed_coeff * time.delta_secs();
             if facing_left {
                 npc_car_transform.translation.x += player_translation_speed;
@@ -1258,6 +1280,7 @@ fn keyboad_input_change_system(
                         speed: rng.gen_range(200.0..290.0),
                         intersects_player: false,
                         intersects_npc: false,
+                        blocks_player_movement: false,
                     },
                     Sprite {
                         flip_x: flip_x,
