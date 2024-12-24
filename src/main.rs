@@ -7,6 +7,7 @@ use bevy::{
     },
     prelude::*,
     render::{camera::ScalingMode, view::visibility},
+    state::commands,
     text,
     utils::hashbrown::HashMap,
 };
@@ -31,6 +32,7 @@ const LANE_HEIGHT: f32 = 70.;
 const HALF_CAR_WIDTH: f32 = 89. / 2.;
 const PERSON_Y_TOP: f32 = 160.;
 const PERSON_Y_BOTTOM: f32 = -160.;
+const TIME_LIMIT: f32 = 60.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, States)]
 pub enum AppState {
@@ -97,7 +99,7 @@ pub struct Ride {
     pub trip_time: f32,
 }
 
-#[derive(Resource, Debug)]
+#[derive(Resource, Debug, Clone, Deref, DerefMut)]
 pub struct CurrentSelection(pub String);
 
 #[derive(Resource)]
@@ -127,7 +129,7 @@ impl Default for PlayerHealth {
     fn default() -> Self {
         Self {
             time_limit_required_earnings: 50.,
-            time_limit: Timer::from_seconds(60., TimerMode::Once),
+            time_limit: Timer::from_seconds(TIME_LIMIT, TimerMode::Once),
             level: 0.0,
             total_earnings: 0.0,
             spent: 0.0,
@@ -264,6 +266,8 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
     resume_game: Res<ResumeGame>,
+    mut last_dialog: ResMut<menu::LastDialog>,
+    mut dialog_message: ResMut<structured_dialog::DialogMessage>,
 ) {
     let rba_dark_gray = 0.025;
     bg.0 = Color::linear_rgba(rba_dark_gray, rba_dark_gray, rba_dark_gray, 0.0);
@@ -282,6 +286,9 @@ fn setup(
     ));
 
     if resume_game.0 {
+        dialog_message.dialog = last_dialog.0.clone();
+        last_dialog.0 = None;
+
         return;
     }
 
@@ -1531,15 +1538,34 @@ pub fn dialog_display_system(
 }
 
 pub fn reset(
+    mut commands: Commands,
     mut reset_game: ResMut<ResetGame>,
     mut dialog_message: ResMut<structured_dialog::DialogMessage>,
     mut travel: ResMut<Travel>,
     mut player_data: ResMut<PlayerHealth>,
     mut taxi: ResMut<Taxi>,
-
     mut current_selection: ResMut<CurrentSelection>,
+    mut car_query: Query<
+        (Entity, &mut Transform, &mut Car),
+        (With<CarMarker>, Without<RoadMarker>, Without<PlayerMarker>),
+    >,
+    mut person_query: Query<
+        (Entity, &mut Transform, &Passenger),
+        (
+            With<PersonMarker>,
+            Without<CarMarker>,
+            Without<RoadMarker>,
+            Without<PlayerMarker>,
+        ),
+    >,
 ) {
     if reset_game.0 {
+        for (entity, _, _) in car_query.iter() {
+            commands.entity(entity).despawn_recursive();
+        }
+        for (entity, _, _) in person_query.iter() {
+            commands.entity(entity).despawn_recursive();
+        }
         reset_game.0 = false;
         dialog_message.dialog = None;
         *travel = Travel::default();
@@ -1633,7 +1659,9 @@ pub fn dialog_choice_selection_system(
 
     interaction_rate_limit.0.tick(time.delta());
     if interaction_rate_limit.0.finished() || interaction_rate_limit.0.just_finished() {
-        interaction_rate_limit.0.reset();
+        if up_key_pressed || down_key_pressed || enter_key_just_pressed {
+            interaction_rate_limit.0.reset();
+        }
 
         let index = match choices
             .iter()

@@ -1,6 +1,8 @@
 use std::thread::current;
 
+use crate::menu;
 use crate::structured_dialog;
+use crate::structured_dialog::Dialog;
 use crate::util;
 use crate::AppState;
 use crate::CurrentSelection;
@@ -8,6 +10,7 @@ use crate::DialogDisplay;
 use crate::DialogTextbox;
 use crate::DisplayLanguage;
 use crate::InteractionRateLimit;
+use crate::ResumeGame;
 use crate::SelectionMarker;
 
 use bevy::utils::hashbrown::HashMap;
@@ -23,15 +26,8 @@ pub struct MenuScrollControl {
     pub selection_index: usize,
 }
 
-#[derive(Component, PartialEq)]
-pub enum Menu {
-    Main,
-    Language,
-    Sound,
-}
-
-#[derive(Resource, Deref, DerefMut)]
-pub struct CurrentMenu(Menu);
+#[derive(Resource, Clone, Deref, DerefMut)]
+pub struct LastDialog(pub Option<Dialog>);
 
 pub struct MenuPlugin;
 
@@ -39,7 +35,7 @@ impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::Menu), menu_setup)
             // .add_plugins(JsonAssetPlugin::<MenuText>::new(&[".json"]))
-            .insert_resource(CurrentMenu(Menu::Main))
+            .insert_resource(LastDialog(None))
             .add_systems(
                 Update,
                 (menu_system, menu_selection_system).run_if(in_state(AppState::Menu)),
@@ -59,13 +55,13 @@ fn menu_setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut bg: ResMut<ClearColor>,
+    resume_game: Res<ResumeGame>,
+    mut last_dialog: ResMut<LastDialog>,
     mut dialog_message: ResMut<structured_dialog::DialogMessage>,
     game_script_asset: Res<Assets<structured_dialog::GameScript>>,
 ) {
+    info!("Menu");
     bg.0 = Color::srgb(0.2, 0.2, 0.2);
-
-    // let menu = MenuHandle(asset_server.load("menu.json"));
-    // commands.insert_resource(menu);
 
     commands.spawn((
         MenuScreen,
@@ -79,10 +75,19 @@ fn menu_setup(
         None => &structured_dialog::GameScript::default(),
     };
 
+    let menu_id = if resume_game.0 {
+        if let None = &last_dialog.0 {
+            last_dialog.0 = dialog_message.dialog.clone();
+        }
+        "pause menu"
+    } else {
+        "main menu"
+    };
+
     dialog_message.dialog = game_script
         .dialogs
         .iter()
-        .filter(|d| d.id == "main menu")
+        .filter(|d| d.id == menu_id)
         .map(|d| d.clone())
         .next();
 }
@@ -113,8 +118,6 @@ pub fn menu_system(
     if !dialog_display_query.is_empty() {
         return;
     }
-
-    info!("create menu");
 
     commands
         .spawn((
@@ -243,6 +246,7 @@ pub fn menu_selection_system(
     mut interaction_rate_limit: ResMut<InteractionRateLimit>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     // axes: Res<Axis<GamepadAxis>>,
+    resume_game: Res<ResumeGame>,
     mut current_selection: ResMut<CurrentSelection>,
     mut dialog_message: ResMut<structured_dialog::DialogMessage>,
     mut selections: Query<(&SelectionMarker, &mut TextSpan)>,
@@ -251,6 +255,19 @@ pub fn menu_selection_system(
     let up_key_pressed = keyboard_input.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
     let down_key_pressed = keyboard_input.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
     let enter_key_just_pressed = keyboard_input.any_just_pressed([KeyCode::KeyE, KeyCode::Enter]);
+
+    if enter_key_just_pressed {
+        debug!(?current_selection);
+        menu_options(
+            current_selection.clone(),
+            game_script_asset,
+            dialog_message,
+            app_state,
+            display_language,
+            resume_game,
+        );
+        return;
+    }
 
     let dialog = match &dialog_message.dialog {
         Some(d) => d,
@@ -268,70 +285,6 @@ pub fn menu_selection_system(
         }
         None => return,
     };
-
-    if enter_key_just_pressed {
-        info!(?current_selection);
-        if let Some(choice) = choices.iter().find(|c| c.choice == current_selection.0) {
-            let game_script = match game_script_asset.iter().next() {
-                Some(d) => d.1,
-                None => &structured_dialog::GameScript::default(),
-            };
-            let next_id = &choice.dialog.actions.next_id;
-            if !next_id.is_empty() {
-                dialog_message.dialog = game_script
-                    .dialogs
-                    .iter()
-                    .filter(|d| d.id == next_id.clone())
-                    .map(|d| d.clone())
-                    .next();
-            } else {
-                //
-                // ============ Menu Options ===============
-                //
-                if choice
-                    .dialog
-                    .actions
-                    .events_changed_on_exit
-                    .contains(&String::from("start_game"))
-                {
-                    dialog_message.dialog = None;
-                    app_state.set(AppState::Game);
-                } else if choice
-                    .dialog
-                    .actions
-                    .events_changed_on_exit
-                    .contains(&String::from("show_credits"))
-                {
-                    dialog_message.dialog = None;
-                    app_state.set(AppState::Splash);
-                } else {
-                    if choice
-                        .dialog
-                        .actions
-                        .events_changed_on_exit
-                        .contains(&String::from("english"))
-                    {
-                        display_language.0 = "english";
-                    } else if choice
-                        .dialog
-                        .actions
-                        .events_changed_on_exit
-                        .contains(&String::from("spanish"))
-                    {
-                        display_language.0 = "spanish";
-                    }
-                    dialog_message.dialog = game_script
-                        .dialogs
-                        .iter()
-                        .filter(|d| d.id == "main menu")
-                        .map(|d| d.clone())
-                        .next();
-                }
-            }
-        }
-
-        return;
-    }
 
     interaction_rate_limit.0.tick(time.delta());
     if interaction_rate_limit.0.finished() || interaction_rate_limit.0.just_finished() {
@@ -389,4 +342,98 @@ pub fn menu_selection_system(
             }
         }
     }
+}
+
+fn menu_options(
+    current_selection: CurrentSelection,
+    game_script_asset: Res<Assets<structured_dialog::GameScript>>,
+    mut dialog_message: ResMut<structured_dialog::DialogMessage>,
+    mut app_state: ResMut<NextState<AppState>>,
+    mut display_language: ResMut<DisplayLanguage>,
+    resume_game: Res<ResumeGame>,
+) {
+    let dialog = match &dialog_message.dialog {
+        Some(d) => d,
+        None => {
+            return;
+        }
+    };
+
+    let choices = match &dialog.choices {
+        Some(choices) => {
+            if choices.is_empty() {
+                return;
+            }
+            choices
+        }
+        None => return,
+    };
+
+    if let Some(choice) = choices.iter().find(|c| c.choice == current_selection.0) {
+        let game_script = match game_script_asset.iter().next() {
+            Some(d) => d.1,
+            None => &structured_dialog::GameScript::default(),
+        };
+        let next_id = &choice.dialog.actions.next_id;
+        if !next_id.is_empty() {
+            dialog_message.dialog = game_script
+                .dialogs
+                .iter()
+                .filter(|d| d.id == next_id.clone())
+                .map(|d| d.clone())
+                .next();
+        } else {
+            //
+            // ============ Menu Options ===============
+            //
+            if choice
+                .dialog
+                .actions
+                .events_changed_on_exit
+                .contains(&String::from("start_game"))
+            {
+                dialog_message.dialog = None;
+                app_state.set(AppState::Game);
+            } else if choice
+                .dialog
+                .actions
+                .events_changed_on_exit
+                .contains(&String::from("show_credits"))
+            {
+                dialog_message.dialog = None;
+                app_state.set(AppState::Splash);
+            } else {
+                if choice
+                    .dialog
+                    .actions
+                    .events_changed_on_exit
+                    .contains(&String::from("english"))
+                {
+                    display_language.0 = "english";
+                } else if choice
+                    .dialog
+                    .actions
+                    .events_changed_on_exit
+                    .contains(&String::from("spanish"))
+                {
+                    display_language.0 = "spanish";
+                }
+
+                let menu_id = if resume_game.0 {
+                    "pause menu"
+                } else {
+                    "main menu"
+                };
+
+                dialog_message.dialog = game_script
+                    .dialogs
+                    .iter()
+                    .filter(|d| d.id == menu_id)
+                    .map(|d| d.clone())
+                    .next();
+            }
+        }
+    }
+
+    return;
 }
