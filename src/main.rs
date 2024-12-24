@@ -1,5 +1,6 @@
 use bevy::{
     ecs::query,
+    input::keyboard::Key,
     math::{
         bounding::{Aabb2d, BoundingVolume, IntersectsVolume},
         vec2, NormedVectorSpace,
@@ -17,7 +18,9 @@ use structured_dialog::Choice;
 
 use util::window::PixelScale;
 
+mod menu;
 mod names;
+mod splash;
 mod structured_dialog;
 mod util;
 
@@ -29,8 +32,21 @@ const HALF_CAR_WIDTH: f32 = 89. / 2.;
 const PERSON_Y_TOP: f32 = 160.;
 const PERSON_Y_BOTTOM: f32 = -160.;
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, States)]
+pub enum AppState {
+    #[default]
+    Splash,
+    Game,
+    Pause,
+    Menu,
+    GameOver,
+}
+
 #[derive(Resource, Deref, DerefMut)]
 pub struct DisplayLanguage(pub &'static str);
+
+#[derive(Component)]
+pub struct GameState;
 
 #[derive(Component, Default)]
 pub struct InteractionObjectOptions {
@@ -81,7 +97,7 @@ pub struct Ride {
     pub trip_time: f32,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Debug)]
 pub struct CurrentSelection(pub String);
 
 #[derive(Resource)]
@@ -175,6 +191,7 @@ pub struct DialogTextbox;
 
 fn main() {
     App::new()
+        .add_systems(Startup, load_json)
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
@@ -186,19 +203,23 @@ fn main() {
                 ..default()
             }),
             JsonAssetPlugin::<structured_dialog::GameScript>::new(&[".json"]),
+            splash::SplashPlugin,
+            menu::MenuPlugin,
         ))
+        .init_state::<AppState>()
         .insert_resource(ResetGame(false))
+        .insert_resource(ResumeGame(false))
         .insert_resource(Travel::default())
         .insert_resource(PlayerHealth::default())
         .insert_resource(Taxi { ..default() })
         .insert_resource(CurrentSelection(String::new()))
         .insert_resource(InteractionRateLimit(Timer::from_seconds(
-            0.05,
+            0.20,
             TimerMode::Once,
         )))
         .insert_resource(OccuredEvents(vec![]))
         .insert_resource(Posessions(vec![]))
-        .insert_resource(DisplayLanguage("spanish"))
+        .insert_resource(DisplayLanguage("english"))
         .insert_resource(structured_dialog::DialogMessage {
             selection_index: 1,
             ..default()
@@ -207,7 +228,7 @@ fn main() {
         .insert_resource(SpawnThingTimer {
             timer: Timer::from_seconds(0.2, TimerMode::Repeating),
         })
-        .add_systems(Startup, setup)
+        .add_systems(OnEnter(AppState::Game), setup)
         .add_systems(
             PreUpdate,
             (util::window::hud_resizer, util::window::hud_scale_updater),
@@ -219,21 +240,36 @@ fn main() {
                 keyboad_input_change_system,
                 road_line_system,
                 car_intersection_system,
-            ),
+                reset,
+                dialog_display_system,
+                dialog_choice_selection_system,
+            )
+                .run_if(in_state(AppState::Game)),
         )
-        .add_systems(
-            Update,
-            (reset, dialog_display_system, dialog_choice_selection_system),
-        )
+        .add_systems(OnExit(AppState::Game), util::despawn_screen::<GameCamera>)
         .run();
 }
 
+fn load_json(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let dialog = structured_dialog::DialogHandle(asset_server.load("dialog.json"));
+    commands.insert_resource(dialog);
+}
+
+#[derive(Component)]
+pub struct GameCamera;
+
 fn setup(
+    mut bg: ResMut<ClearColor>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
+    resume_game: Res<ResumeGame>,
 ) {
+    let rba_dark_gray = 0.025;
+    bg.0 = Color::linear_rgba(rba_dark_gray, rba_dark_gray, rba_dark_gray, 0.0);
     commands.spawn((
+        GameState,
+        GameCamera,
         Camera2d { ..default() },
         Projection::from(OrthographicProjection {
             scaling_mode: ScalingMode::Fixed {
@@ -245,12 +281,14 @@ fn setup(
         }),
     ));
 
-    let dialog = structured_dialog::DialogHandle(asset_server.load("dialog.json"));
-    commands.insert_resource(dialog);
+    if resume_game.0 {
+        return;
+    }
 
     let player_y_start = -LANE_HEIGHT / 2.;
     commands
         .spawn((
+            GameState,
             PlayerMarker,
             Intersects::default(),
             PlayerCar {
@@ -281,17 +319,21 @@ fn setup(
         ))
         .insert(Transform::from_xyz(0., -LANE_HEIGHT / 2., 0.));
 
-    commands.spawn(Sprite {
-        flip_x: false,
-        image: asset_server.load("road.png"),
-        ..default()
-    });
+    commands.spawn((
+        GameState,
+        Sprite {
+            flip_x: false,
+            image: asset_server.load("road.png"),
+            ..default()
+        },
+    ));
 
     for i in -6..7 {
         let x = (i as f32) * 56.;
-        info!(x);
+        // info!(x);
         commands
             .spawn((
+                GameState,
                 RoadMarker,
                 Sprite {
                     flip_x: false,
@@ -304,9 +346,10 @@ fn setup(
 
     for i in -6..7 {
         let x = (i as f32) * 56.;
-        info!(x);
+        // info!(x);
         commands
             .spawn((
+                GameState,
                 RoadMarker,
                 Sprite {
                     flip_x: false,
@@ -319,6 +362,7 @@ fn setup(
 
     commands
         .spawn((
+            GameState,
             util::window::Scalers {
                 left: Some(Val::Px(20.0)),
                 // right: Some(Val::Px(75.0)),
@@ -333,6 +377,7 @@ fn setup(
         ))
         .with_children(|p| {
             p.spawn((
+                GameState,
                 // BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
                 Node {
                     // background_color: BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
@@ -361,7 +406,7 @@ fn setup(
 
                     ..default()
                 };
-                p.spawn((text_style.clone(), Text::default()))
+                p.spawn((GameState, text_style.clone(), Text::default()))
                     .with_children(|p| {
                         let text_font = TextFont {
                             font: asset_server.load("fonts/PressStart2P-vaV7.ttf"),
@@ -370,6 +415,7 @@ fn setup(
                         };
 
                         p.spawn((
+                            GameState,
                             UiElement(String::from("timer")),
                             text_font.clone(),
                             TextSpan::new(""),
@@ -377,6 +423,7 @@ fn setup(
                     });
             });
             p.spawn((
+                GameState,
                 // BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
                 Node {
                     // background_color: BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
@@ -406,7 +453,7 @@ fn setup(
                     ..default()
                 };
 
-                p.spawn((text_style.clone(), Text::default()))
+                p.spawn((GameState, text_style.clone(), Text::default()))
                     .with_children(|p| {
                         let text_font = TextFont {
                             font: asset_server.load("fonts/PressStart2P-vaV7.ttf"),
@@ -415,6 +462,7 @@ fn setup(
                         };
 
                         p.spawn((
+                            GameState,
                             UiElement(String::from("must_earn")),
                             text_font.clone(),
                             TextSpan::new(""),
@@ -423,6 +471,7 @@ fn setup(
             });
 
             p.spawn((
+                GameState,
                 // BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
                 Node {
                     // background_color: BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
@@ -451,7 +500,7 @@ fn setup(
 
                     ..default()
                 };
-                p.spawn((text_style.clone(), Text::default()))
+                p.spawn((GameState, text_style.clone(), Text::default()))
                     .with_children(|p| {
                         let text_font = TextFont {
                             font: asset_server.load("fonts/PressStart2P-vaV7.ttf"),
@@ -460,6 +509,7 @@ fn setup(
                         };
 
                         p.spawn((
+                            GameState,
                             UiElement(String::from("earned")),
                             text_font.clone(),
                             TextSpan::new(""),
@@ -468,6 +518,7 @@ fn setup(
             });
 
             p.spawn((
+                GameState,
                 // BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
                 Node {
                     // background_color: BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
@@ -496,7 +547,7 @@ fn setup(
 
                     ..default()
                 };
-                p.spawn((text_style.clone(), Text::default()))
+                p.spawn((GameState, text_style.clone(), Text::default()))
                     .with_children(|p| {
                         let text_font = TextFont {
                             font: asset_server.load("fonts/PressStart2P-vaV7.ttf"),
@@ -505,6 +556,7 @@ fn setup(
                         };
 
                         p.spawn((
+                            GameState,
                             UiElement(String::from("total_earned")),
                             text_font.clone(),
                             TextSpan::new(""),
@@ -513,6 +565,7 @@ fn setup(
             });
 
             p.spawn((
+                GameState,
                 // BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
                 Node {
                     // background_color: BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
@@ -531,6 +584,7 @@ fn setup(
             ))
             .with_children(|p| {
                 p.spawn((
+                    GameState,
                     PersonInCarMarker,
                     Node {
                         width: Val::Px(9. * 3.),
@@ -557,11 +611,14 @@ fn setup(
         });
 
     commands
-        .spawn(Sprite {
-            flip_x: false,
-            image: asset_server.load("dashboard-bg.png"),
-            ..default()
-        })
+        .spawn((
+            GameState,
+            Sprite {
+                flip_x: false,
+                image: asset_server.load("dashboard-bg.png"),
+                ..default()
+            },
+        ))
         .insert(Transform::from_xyz(0., -320. + (0. * 75. * 1.5), 1.));
 }
 
@@ -709,7 +766,7 @@ fn game_level_system(
                 0.258
             };
 
-            info!("{}", 1. + x);
+            // info!("{}", 1. + x);
             player_data.time_limit_required_earnings = (49.0_f32.powf(1. + x)).ceil();
         } else {
             let game_over = game_script
@@ -1008,7 +1065,7 @@ fn keyboad_input_change_system(
                         dialog_message.dialog = Some(game_script.dialogs[2].clone());
                         info.distance_past_dropoff +=
                             SPEED_X * player_car.speed_coeff * time.delta_secs() / 1000.;
-                        info!("{}", info.distance_past_dropoff);
+                        // info!("{}", info.distance_past_dropoff);
                     } else if can_drop_off
                         && player_car.speed_coeff == 0.0
                         && id == String::from("here")
@@ -1019,7 +1076,7 @@ fn keyboad_input_change_system(
                         && id == String::from("")
                     {
                         // SUCCESSFUL DROP OFF
-                        info!("Show bye message");
+                        // info!("Show bye message");
                         let distance_based_tip_adjustment = if info.distance_past_dropoff < 0.25 {
                             3.5
                         } else if info.distance_past_dropoff < 0.5 {
@@ -1064,7 +1121,7 @@ fn keyboad_input_change_system(
                             + time_ratio_based_tip_adjustment
                             + time_past_dropoff_tip_adjustment;
 
-                        info!("{}", info.tip_percentage);
+                        // info!("{}", info.tip_percentage);
 
                         info.tip = (info.trip_cost * (info.tip_percentage / 100.))
                             .max(0.0)
@@ -1081,6 +1138,7 @@ fn keyboad_input_change_system(
                         };
                         commands
                             .spawn((
+                                GameState,
                                 PersonMarker,
                                 info.passenger.clone(),
                                 Sprite {
@@ -1200,6 +1258,7 @@ fn keyboad_input_change_system(
         // code to spawn goes here
         commands
             .spawn((
+                GameState,
                 PersonMarker,
                 Passenger {
                     name: passenger_name.clone(),
@@ -1225,10 +1284,13 @@ fn keyboad_input_change_system(
             .with_children(|commands| {
                 if random_bool_one_in_n(5) {
                     commands
-                        .spawn(Sprite {
-                            image: assest_server.load("player-outline.png"),
-                            ..default()
-                        })
+                        .spawn((
+                            GameState,
+                            Sprite {
+                                image: assest_server.load("player-outline.png"),
+                                ..default()
+                            },
+                        ))
                         .insert(Passenger {
                             name: passenger_name.clone(),
                             sprite_index: sprite_index,
@@ -1238,10 +1300,13 @@ fn keyboad_input_change_system(
                         .insert(Visibility::Hidden);
                     let y = 30.;
                     commands
-                        .spawn(Sprite {
-                            image: assest_server.load("exclaimation.png"),
-                            ..default()
-                        })
+                        .spawn((
+                            GameState,
+                            Sprite {
+                                image: assest_server.load("exclaimation.png"),
+                                ..default()
+                            },
+                        ))
                         .insert(Passenger {
                             name: passenger_name.clone(),
                             sprite_index: sprite_index,
@@ -1270,6 +1335,7 @@ fn keyboad_input_change_system(
         if random_bool_one_in_n(1) && allow_obstable_spawn {
             commands
                 .spawn((
+                    GameState,
                     CarMarker,
                     Intersects::default(),
                     Car {
@@ -1332,6 +1398,7 @@ pub fn dialog_display_system(
 
     commands
         .spawn((
+            GameState,
             DialogDisplay(dialog.id.clone()),
             util::window::Scalers {
                 left: Some(Val::Px(20.0)),
@@ -1348,6 +1415,7 @@ pub fn dialog_display_system(
         ))
         .with_children(|p| {
             p.spawn((
+                GameState,
                 DialogTextbox,
                 BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
                 Node {
@@ -1375,7 +1443,7 @@ pub fn dialog_display_system(
                     },
                     ..default()
                 };
-                p.spawn((text_style.clone(), Text::default()))
+                p.spawn((GameState, text_style.clone(), Text::default()))
                     .with_children(|p| {
                         let text_font = TextFont {
                             font: asset_server.load("fonts/PressStart2P-vaV7.ttf"),
@@ -1420,7 +1488,7 @@ pub fn dialog_display_system(
                             text.clone()
                         };
 
-                        p.spawn((text_font.clone(), TextSpan::new(text.clone())));
+                        p.spawn((GameState, text_font.clone(), TextSpan::new(text.clone())));
                         // info!("Should be displaying: {}", text);
 
                         match &dialog.choices {
@@ -1447,6 +1515,7 @@ pub fn dialog_display_system(
                                     };
 
                                     p.spawn((
+                                        GameState,
                                         SelectionMarker(choice_id),
                                         text_font,
                                         TextSpan::new(format!("\n\n {}", text)),
@@ -1483,6 +1552,9 @@ pub fn reset(
 #[derive(Resource)]
 pub struct ResetGame(bool);
 
+#[derive(Resource)]
+pub struct ResumeGame(bool);
+
 pub fn dialog_choice_selection_system(
     mut commands: Commands,
     time: Res<Time>,
@@ -1498,10 +1570,19 @@ pub fn dialog_choice_selection_system(
     mut travel: ResMut<Travel>,
     mut taxi: ResMut<Taxi>,
     mut reset_game: ResMut<ResetGame>,
+    mut app_state: ResMut<NextState<AppState>>,
+    mut resume_game: ResMut<ResumeGame>,
 ) {
     let up_key_pressed = keyboard_input.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
     let down_key_pressed = keyboard_input.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
     let enter_key_just_pressed = keyboard_input.any_just_pressed([KeyCode::KeyE, KeyCode::Enter]);
+
+    let pause = keyboard_input.just_pressed(KeyCode::KeyP);
+    if pause {
+        resume_game.0 = true;
+        app_state.set(AppState::Menu);
+        return;
+    }
 
     let dialog = match &dialog_message.dialog {
         Some(d) => d,

@@ -154,6 +154,132 @@
                 "items_changed_on_exit": [],
                 "next_id": ""
             }
+        },
+        {
+            "id": "main menu",
+            "name": "menu",
+            "events": [],
+            "posessions": [],
+            "language": {
+                "english": "",
+                "spanish": ""
+            },
+            "choices": [
+                {
+                    "choice": "play",
+                    "dialog": {
+                        "language": {
+                            "english": "Start",
+                            "spanish": "Empieza"
+                        },
+                        "actions": {
+                            "events_changed_on_enter": [],
+                            "items_changed_on_enter": [],
+                            "events_changed_on_exit": [
+                                "start_game"
+                            ],
+                            "items_changed_on_exit": [],
+                            "next_id": ""
+                        }
+                    }
+                },
+                {
+                    "choice": "credits",
+                    "dialog": {
+                        "language": {
+                            "english": "Credits",
+                            "spanish": "Creditos"
+                        },
+                        "actions": {
+                            "events_changed_on_enter": [],
+                            "items_changed_on_enter": [],
+                            "events_changed_on_exit": [
+                                "show_credits"
+                            ],
+                            "items_changed_on_exit": [],
+                            "next_id": ""
+                        }
+                    }
+                },
+                {
+                    "choice": "language",
+                    "dialog": {
+                        "language": {
+                            "english": "Language",
+                            "spanish": "Idioma"
+                        },
+                        "actions": {
+                            "events_changed_on_enter": [],
+                            "items_changed_on_enter": [],
+                            "events_changed_on_exit": [],
+                            "items_changed_on_exit": [],
+                            "next_id": "language"
+                        }
+                    }
+                }
+            ],
+            "actions": {
+                "events_changed_on_enter": [],
+                "items_changed_on_enter": [],
+                "events_changed_on_exit": [],
+                "items_changed_on_exit": [],
+                "next_id": ""
+            }
+        },
+        {
+            "id": "language",
+            "name": "menu",
+            "events": [],
+            "posessions": [],
+            "language": {
+                "english": "",
+                "spanish": ""
+            },
+            "choices": [
+                {
+                    "choice": "english",
+                    "dialog": {
+                        "language": {
+                            "english": "English",
+                            "spanish": "English"
+                        },
+                        "actions": {
+                            "events_changed_on_enter": [],
+                            "items_changed_on_enter": [],
+                            "events_changed_on_exit": [
+                                "english"
+                            ],
+                            "items_changed_on_exit": [],
+                            "next_id": ""
+                        }
+                    }
+                },
+                {
+                    "choice": "spanish",
+                    "dialog": {
+                        "language": {
+                            "english": "Español",
+                            "spanish": "Español"
+                        },
+                        "actions": {
+                            "events_changed_on_enter": [],
+                            "items_changed_on_enter": [],
+                            "events_changed_on_exit": [
+                                "spanish"
+                            ],
+                            "items_changed_on_exit": [],
+                            "next_id": ""
+                        }
+                    }
+                }
+            ],
+            "actions": {
+                "events_changed_on_enter": [],
+                "items_changed_on_enter": [],
+                "events_changed_on_exit": [],
+                "items_changed_on_exit": [],
+                "next_id": ""
+            }
         }
     ]
 }
