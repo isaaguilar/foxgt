@@ -1,4 +1,5 @@
 use bevy::{
+    audio::PlaybackMode,
     ecs::query,
     input::keyboard::Key,
     math::{
@@ -42,6 +43,17 @@ pub enum AppState {
     Pause,
     Menu,
     GameOver,
+}
+
+#[derive(Resource, Default, PartialEq)]
+pub enum SpeedSfx {
+    Off,
+    Hi,
+    MedHi,
+    Med,
+    MedLow,
+    #[default]
+    Low,
 }
 
 #[derive(Resource, Deref, DerefMut)]
@@ -209,6 +221,7 @@ fn main() {
             menu::MenuPlugin,
         ))
         .init_state::<AppState>()
+        .insert_resource(SpeedSfx::default())
         .insert_resource(ResetGame(false))
         .insert_resource(ResumeGame(false))
         .insert_resource(Travel::default())
@@ -238,6 +251,7 @@ fn main() {
         .add_systems(
             Update,
             (
+                motor_sfx,
                 game_level_system,
                 keyboad_input_change_system,
                 road_line_system,
@@ -627,6 +641,16 @@ fn setup(
             },
         ))
         .insert(Transform::from_xyz(0., -320. + (0. * 75. * 1.5), 1.));
+
+    commands.spawn((
+        MotorSound(String::from("motor")),
+        AudioPlayer::new(asset_server.load("motor.mp3")),
+        PlaybackSettings {
+            mode: PlaybackMode::Loop,
+            paused: false,
+            ..default()
+        },
+    ));
 }
 
 fn car_intersection_system(
@@ -700,6 +724,22 @@ fn car_intersection_system(
             // info!("NPCs intersected");
         }
     });
+}
+
+#[derive(Component)]
+pub struct MotorSound(String);
+
+fn motor_sfx(
+    player_query: Query<&PlayerCar, With<PlayerMarker>>,
+    speed_sound: Query<&AudioSink, With<MotorSound>>,
+) {
+    for player_car in player_query.iter() {
+        let s = 0.5 * player_car.speed_coeff + 0.5;
+        info!(s);
+        for audio in speed_sound.iter() {
+            audio.set_speed(s);
+        }
+    }
 }
 
 fn game_level_system(

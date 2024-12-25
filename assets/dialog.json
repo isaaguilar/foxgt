@@ -127,7 +127,7 @@
             "posessions": [],
             "language": {
                 "english": "Game Over\n\nStats:\nRound: {level}\nTotal Collected: {total_collected}\nRides Completed: {rides_completed}\nDistance Traveled: {total_distance} km",
-                "spanish": "Fin del Juego\n\nEstadísticas:\nRonda: {level}\nTotal Recolectado: {total_collected}\nViajes Completados: {rides_completed}\nDistancia Recorrida: {total_distance} km"
+                "spanish": "Fin del Juego\n\nEstatísticas:\nRonda: {level}\nTotal Recolectado: {total_collected}\nViajes Completados: {rides_completed}\nDistancia Recorrida: {total_distance} km"
             },
             "choices": [
                 {
