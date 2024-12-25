@@ -353,6 +353,57 @@
                 "items_changed_on_exit": [],
                 "next_id": ""
             }
+        },
+        {
+            "id": "must_earn",
+            "name": "ui_element",
+            "events": [],
+            "posessions": [],
+            "language": {
+                "english": "Target",
+                "spanish": "Objetivo"
+            },
+            "actions": {
+                "events_changed_on_enter": [],
+                "items_changed_on_enter": [],
+                "events_changed_on_exit": [],
+                "items_changed_on_exit": [],
+                "next_id": ""
+            }
+        },
+        {
+            "id": "earned",
+            "name": "ui_element",
+            "events": [],
+            "posessions": [],
+            "language": {
+                "english": "Money Earned",
+                "spanish": "Dinero Ganado"
+            },
+            "actions": {
+                "events_changed_on_enter": [],
+                "items_changed_on_enter": [],
+                "events_changed_on_exit": [],
+                "items_changed_on_exit": [],
+                "next_id": ""
+            }
+        },
+        {
+            "id": "total_earned",
+            "name": "ui_element",
+            "events": [],
+            "posessions": [],
+            "language": {
+                "english": "Total Earned",
+                "spanish": "Total Ganado"
+            },
+            "actions": {
+                "events_changed_on_enter": [],
+                "items_changed_on_enter": [],
+                "events_changed_on_exit": [],
+                "items_changed_on_exit": [],
+                "next_id": ""
+            }
         }
     ]
 }

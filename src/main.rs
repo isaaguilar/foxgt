@@ -32,7 +32,7 @@ const LANE_HEIGHT: f32 = 70.;
 const HALF_CAR_WIDTH: f32 = 89. / 2.;
 const PERSON_Y_TOP: f32 = 160.;
 const PERSON_Y_BOTTOM: f32 = -160.;
-const TIME_LIMIT: f32 = 60.0;
+const TIME_LIMIT_SECONDS: f32 = 60.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, States)]
 pub enum AppState {
@@ -129,7 +129,7 @@ impl Default for PlayerHealth {
     fn default() -> Self {
         Self {
             time_limit_required_earnings: 50.,
-            time_limit: Timer::from_seconds(TIME_LIMIT, TimerMode::Once),
+            time_limit: Timer::from_seconds(TIME_LIMIT_SECONDS, TimerMode::Once),
             level: 0.0,
             total_earnings: 0.0,
             spent: 0.0,
@@ -705,6 +705,7 @@ fn car_intersection_system(
 fn game_level_system(
     time: Res<Time>,
     taxi: Res<Taxi>,
+    display_language: Res<DisplayLanguage>,
     mut player_data: ResMut<PlayerHealth>,
     mut dialog_message: ResMut<structured_dialog::DialogMessage>,
     game_script_asset: Res<Assets<structured_dialog::GameScript>>,
@@ -745,17 +746,53 @@ fn game_level_system(
 
     player_data.time_limit.tick(time.delta());
     for (ui_element, mut text_span) in ui_element_query.iter_mut() {
+        let must_earn = match game_script.dialogs.iter().find(|d| d.id == "must_earn") {
+            Some(dialog) => {
+                if display_language.0 == "english" {
+                    &dialog.language.english
+                } else {
+                    &dialog.language.spanish
+                }
+            }
+            None => "Must earn",
+        };
+
+        let earned = match game_script.dialogs.iter().find(|d| d.id == "earned") {
+            Some(dialog) => {
+                if display_language.0 == "english" {
+                    &dialog.language.english
+                } else {
+                    &dialog.language.spanish
+                }
+            }
+            None => "Earned",
+        };
+
+        let total_earned = match game_script.dialogs.iter().find(|d| d.id == "total_earned") {
+            Some(dialog) => {
+                if display_language.0 == "english" {
+                    &dialog.language.english
+                } else {
+                    &dialog.language.spanish
+                }
+            }
+            None => "Total earned",
+        };
+
         if ui_element.0 == "timer" {
             text_span.0 = format!("{}", player_data.time_limit.remaining_secs().round());
         }
         if ui_element.0 == "must_earn" {
-            text_span.0 = format!("Must earn\n{}", player_data.time_limit_required_earnings);
+            text_span.0 = format!(
+                "{}\n{}",
+                must_earn, player_data.time_limit_required_earnings
+            );
         }
         if ui_element.0 == "earned" {
-            text_span.0 = format!("Earned\n{}", player_data.earnings);
+            text_span.0 = format!("{}\n{}", earned, player_data.earnings);
         }
         if ui_element.0 == "total_earned" {
-            text_span.0 = format!("Total earned\n{}", player_data.total_earnings);
+            text_span.0 = format!("{}\n{}", total_earned, player_data.total_earnings);
         }
     }
 
