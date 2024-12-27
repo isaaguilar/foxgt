@@ -1,5 +1,5 @@
 use bevy::{
-    audio::PlaybackMode,
+    audio::{PlaybackMode, Volume},
     ecs::query,
     input::keyboard::Key,
     math::{
@@ -188,11 +188,19 @@ pub struct UiElement(String);
 #[derive(Component)]
 pub struct PersonHighlightMarker;
 
+#[derive(Component, Clone)]
+pub struct InGameSound {
+    category: String,
+    volume: f32,
+}
+
 #[derive(Component)]
 pub struct PlayerCar {
     pub aabb: Aabb2d,
     pub speed_coeff: f32,
     pub timer: Timer,
+    pub rate_limit_up: Timer,
+    pub rate_limit_down: Timer,
     pub atlas_left: (usize, usize),
     pub atlas_right: (usize, usize),
 }
@@ -202,6 +210,14 @@ pub struct DialogDisplay(String);
 
 #[derive(Component)]
 pub struct DialogTextbox;
+
+#[derive(Resource)]
+pub struct Volumes {
+    volumes: Vec<InGameSound>,
+}
+
+#[derive(Component)]
+pub struct GameCamera;
 
 fn main() {
     App::new()
@@ -222,8 +238,23 @@ fn main() {
         ))
         .init_state::<AppState>()
         .insert_resource(SpeedSfx::default())
+        .insert_resource(Volumes {
+            volumes: vec![
+                InGameSound {
+                    category: String::from("sfx"),
+                    volume: 1.,
+                },
+                InGameSound {
+                    category: String::from("music"),
+                    volume: 0.50,
+                },
+            ],
+        })
         .insert_resource(ResetGame(false))
-        .insert_resource(ResumeGame(false))
+        .insert_resource(ResumeGame {
+            resume: false,
+            pause: true,
+        })
         .insert_resource(Travel::default())
         .insert_resource(PlayerHealth::default())
         .insert_resource(Taxi { ..default() })
@@ -243,7 +274,7 @@ fn main() {
         .insert_resource(SpawnThingTimer {
             timer: Timer::from_seconds(0.2, TimerMode::Repeating),
         })
-        .add_systems(OnEnter(AppState::Game), setup)
+        .add_systems(OnEnter(AppState::Game), (sound_controller, setup))
         .add_systems(
             PreUpdate,
             (util::window::hud_resizer, util::window::hud_scale_updater),
@@ -262,7 +293,10 @@ fn main() {
             )
                 .run_if(in_state(AppState::Game)),
         )
-        .add_systems(OnExit(AppState::Game), util::despawn_screen::<GameCamera>)
+        .add_systems(
+            OnExit(AppState::Game),
+            (sound_controller, util::despawn_screen::<GameCamera>),
+        )
         .run();
 }
 
@@ -271,15 +305,13 @@ fn load_json(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.insert_resource(dialog);
 }
 
-#[derive(Component)]
-pub struct GameCamera;
-
 fn setup(
     mut bg: ResMut<ClearColor>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
-    resume_game: Res<ResumeGame>,
+    mut resume_game: ResMut<ResumeGame>,
+    volumes: Res<Volumes>,
     mut last_dialog: ResMut<menu::LastDialog>,
     mut dialog_message: ResMut<structured_dialog::DialogMessage>,
 ) {
@@ -299,7 +331,8 @@ fn setup(
         }),
     ));
 
-    if resume_game.0 {
+    if resume_game.resume {
+        resume_game.pause = false;
         dialog_message.dialog = last_dialog.0.clone();
         last_dialog.0 = None;
 
@@ -319,6 +352,8 @@ fn setup(
                 },
                 speed_coeff: 0.,
                 timer: Timer::from_seconds(0.075, TimerMode::Repeating),
+                rate_limit_up: Timer::from_seconds(0.25, TimerMode::Once),
+                rate_limit_down: Timer::from_seconds(0.25, TimerMode::Once),
                 atlas_right: (0, 2),
                 atlas_left: (3, 5),
             },
@@ -642,15 +677,64 @@ fn setup(
         ))
         .insert(Transform::from_xyz(0., -320. + (0. * 75. * 1.5), 1.));
 
+    let vol = volumes
+        .volumes
+        .iter()
+        .find(|s| s.category == "sfx")
+        .unwrap()
+        .clone();
     commands.spawn((
         MotorSound(String::from("motor")),
+        vol.clone(),
         AudioPlayer::new(asset_server.load("motor.mp3")),
         PlaybackSettings {
             mode: PlaybackMode::Loop,
             paused: false,
+            volume: Volume::new(vol.volume),
             ..default()
         },
     ));
+
+    let vol = volumes
+        .volumes
+        .iter()
+        .find(|s| s.category == "music")
+        .unwrap()
+        .clone();
+    commands.spawn((
+        vol.clone(),
+        AudioPlayer::new(asset_server.load("taxiinstyle.mp3")),
+        PlaybackSettings {
+            mode: PlaybackMode::Loop,
+            paused: false,
+            volume: Volume::new(vol.volume),
+            ..default()
+        },
+    ));
+}
+
+fn sound_controller(
+    resume_game: Res<ResumeGame>,
+    volumes: Res<Volumes>,
+    in_game_sounds: Query<(&AudioSink, &mut InGameSound)>,
+) {
+    if !resume_game.pause {
+        'sound_loop: for (audio, in_game_sound) in in_game_sounds.iter() {
+            let category = in_game_sound.category.clone();
+            for volume in volumes.volumes.iter() {
+                if volume.category == category {
+                    if volume.volume == 0.0 {
+                        continue 'sound_loop;
+                    }
+                }
+            }
+            audio.play();
+        }
+    } else {
+        for (audio, in_game_sound) in in_game_sounds.iter() {
+            audio.pause();
+        }
+    }
 }
 
 fn car_intersection_system(
@@ -903,6 +987,7 @@ fn keyboad_input_change_system(
     game_script_asset: Res<Assets<structured_dialog::GameScript>>,
     mut spawn_thing_timer: ResMut<SpawnThingTimer>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
     mut car_query: Query<
         (Entity, &mut Transform, &mut Car),
         (With<CarMarker>, Without<RoadMarker>, Without<PlayerMarker>),
@@ -947,14 +1032,38 @@ fn keyboad_input_change_system(
         None => &structured_dialog::GameScript::default(),
     };
 
-    let right = keyboard.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]);
-    let left = keyboard.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]);
-    let gas = keyboard.pressed(KeyCode::Space);
-    let up_just_pressed = keyboard.any_just_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
-    let down_just_pressed = keyboard.any_just_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
+    let (right, left, gas, up, down) = match gamepads.iter().next() {
+        Some(gamepad) => {
+            let left_stick_x = gamepad.get(GamepadAxis::LeftStickX).unwrap();
+            let left_stick_y = gamepad.get(GamepadAxis::LeftStickY).unwrap();
+
+            (
+                left_stick_x > 0.075,  //right
+                left_stick_x < -0.075, //left
+                gamepad.any_pressed([
+                    GamepadButton::North,
+                    GamepadButton::South,
+                    GamepadButton::East,
+                    GamepadButton::West,
+                ]),
+                left_stick_y > 0.075, //up
+                left_stick_y < -0.75, //down
+            )
+        }
+        None => (false, false, false, false, false),
+    };
+
+    let right = right || keyboard.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]);
+    let left = left || keyboard.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]);
+    let gas = gas || keyboard.pressed(KeyCode::Space);
+    let up_just_pressed = up
+        || keyboard.pressed(KeyCode::ArrowUp)
+        || keyboard.any_just_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
+    let down_just_pressed = down || keyboard.any_just_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
 
     let (mut player_transform, mut player_sprite, mut player_car) = player_query.single_mut();
     player_car.timer.tick(time.delta());
+
     if player_car.speed_coeff == 0.0 {
         if right {
             player_sprite.flip_x = false;
@@ -994,13 +1103,21 @@ fn keyboad_input_change_system(
         player_car.speed_coeff = (player_car.speed_coeff - (1. * time.delta_secs())).max(0.0);
     }
 
+    player_car.rate_limit_up.tick(time.delta());
+    player_car.rate_limit_down.tick(time.delta());
     if up_just_pressed && player_y < LANE_HEIGHT {
-        player_transform.translation.y += LANE_HEIGHT;
-        player_car.aabb.translate_by(vec2(0.0, LANE_HEIGHT));
+        if player_car.rate_limit_up.finished() || player_car.rate_limit_up.just_finished() {
+            player_car.rate_limit_up.reset();
+            player_transform.translation.y += LANE_HEIGHT;
+            player_car.aabb.translate_by(vec2(0.0, LANE_HEIGHT));
+        }
     }
     if down_just_pressed && player_y > -LANE_HEIGHT {
-        player_transform.translation.y -= LANE_HEIGHT;
-        player_car.aabb.translate_by(vec2(0.0, -LANE_HEIGHT));
+        if player_car.rate_limit_down.finished() || player_car.rate_limit_down.just_finished() {
+            player_car.rate_limit_down.reset();
+            player_transform.translation.y -= LANE_HEIGHT;
+            player_car.aabb.translate_by(vec2(0.0, -LANE_HEIGHT));
+        }
     }
 
     let mut allow_obstable_spawn = true;
@@ -1656,7 +1773,10 @@ pub fn reset(
 pub struct ResetGame(bool);
 
 #[derive(Resource)]
-pub struct ResumeGame(bool);
+pub struct ResumeGame {
+    resume: bool,
+    pause: bool,
+}
 
 pub fn dialog_choice_selection_system(
     mut commands: Commands,
@@ -1664,7 +1784,7 @@ pub fn dialog_choice_selection_system(
     display_language: Res<DisplayLanguage>,
     mut interaction_rate_limit: ResMut<InteractionRateLimit>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    // axes: Res<Axis<GamepadAxis>>,
+    gamepads: Query<&Gamepad>,
     mut current_selection: ResMut<CurrentSelection>,
     mut dialog_message: ResMut<structured_dialog::DialogMessage>,
     mut selections: Query<(&SelectionMarker, &mut TextSpan)>,
@@ -1676,13 +1796,37 @@ pub fn dialog_choice_selection_system(
     mut app_state: ResMut<NextState<AppState>>,
     mut resume_game: ResMut<ResumeGame>,
 ) {
-    let up_key_pressed = keyboard_input.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
-    let down_key_pressed = keyboard_input.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
-    let enter_key_just_pressed = keyboard_input.any_just_pressed([KeyCode::KeyE, KeyCode::Enter]);
+    let (right, left, gas, up, down, pause) = match gamepads.iter().next() {
+        Some(gamepad) => {
+            let left_stick_x = gamepad.get(GamepadAxis::LeftStickX).unwrap();
+            let left_stick_y = gamepad.get(GamepadAxis::LeftStickY).unwrap();
 
-    let pause = keyboard_input.just_pressed(KeyCode::KeyP);
+            (
+                left_stick_x > 0.075,  //right
+                left_stick_x < -0.075, //left
+                gamepad.any_just_pressed([
+                    GamepadButton::North,
+                    GamepadButton::South,
+                    GamepadButton::East,
+                    GamepadButton::West,
+                ]),
+                left_stick_y > 0.075, //up
+                left_stick_y < -0.75, //down
+                gamepad.just_pressed(GamepadButton::Start),
+            )
+        }
+        None => (false, false, false, false, false, false),
+    };
+
+    let up_key_pressed = up || keyboard_input.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
+    let down_key_pressed = down || keyboard_input.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
+    let enter_key_just_pressed =
+        gas || keyboard_input.any_just_pressed([KeyCode::KeyE, KeyCode::Enter]);
+
+    let pause = pause || keyboard_input.just_pressed(KeyCode::KeyP);
     if pause {
-        resume_game.0 = true;
+        resume_game.resume = true;
+        resume_game.pause = true;
         app_state.set(AppState::Menu);
         return;
     }

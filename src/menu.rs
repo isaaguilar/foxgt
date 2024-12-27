@@ -75,7 +75,7 @@ fn menu_setup(
         None => &structured_dialog::GameScript::default(),
     };
 
-    let menu_id = if resume_game.0 {
+    let menu_id = if resume_game.resume {
         if let None = &last_dialog.0 {
             last_dialog.0 = dialog_message.dialog.clone();
         }
@@ -245,16 +245,39 @@ pub fn menu_selection_system(
     mut display_language: ResMut<DisplayLanguage>,
     mut interaction_rate_limit: ResMut<InteractionRateLimit>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    // axes: Res<Axis<GamepadAxis>>,
+    gamepads: Query<&Gamepad>,
     resume_game: Res<ResumeGame>,
+    mut volumes: ResMut<crate::Volumes>,
     mut current_selection: ResMut<CurrentSelection>,
     mut dialog_message: ResMut<structured_dialog::DialogMessage>,
     mut selections: Query<(&SelectionMarker, &mut TextSpan)>,
     mut app_state: ResMut<NextState<AppState>>,
 ) {
-    let up_key_pressed = keyboard_input.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
-    let down_key_pressed = keyboard_input.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
-    let enter_key_just_pressed = keyboard_input.any_just_pressed([KeyCode::KeyE, KeyCode::Enter]);
+    let (right, left, gas, up, down, pause) = match gamepads.iter().next() {
+        Some(gamepad) => {
+            let left_stick_x = gamepad.get(GamepadAxis::LeftStickX).unwrap();
+            let left_stick_y = gamepad.get(GamepadAxis::LeftStickY).unwrap();
+
+            (
+                left_stick_x > 0.075,  //right
+                left_stick_x < -0.075, //left
+                gamepad.any_just_pressed([
+                    GamepadButton::North,
+                    GamepadButton::South,
+                    GamepadButton::East,
+                    GamepadButton::West,
+                ]),
+                left_stick_y > 0.075, //up
+                left_stick_y < -0.75, //down
+                gamepad.just_pressed(GamepadButton::Start),
+            )
+        }
+        None => (false, false, false, false, false, false),
+    };
+    let up_key_pressed = up || keyboard_input.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
+    let down_key_pressed = down || keyboard_input.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
+    let enter_key_just_pressed =
+        gas || keyboard_input.any_just_pressed([KeyCode::KeyE, KeyCode::Enter]);
 
     if enter_key_just_pressed {
         debug!(?current_selection);
@@ -264,6 +287,7 @@ pub fn menu_selection_system(
             dialog_message,
             app_state,
             display_language,
+            volumes,
             resume_game,
         );
         return;
@@ -350,6 +374,7 @@ fn menu_options(
     mut dialog_message: ResMut<structured_dialog::DialogMessage>,
     mut app_state: ResMut<NextState<AppState>>,
     mut display_language: ResMut<DisplayLanguage>,
+    mut volumes: ResMut<crate::Volumes>,
     resume_game: Res<ResumeGame>,
 ) {
     let dialog = match &dialog_message.dialog {
@@ -410,7 +435,9 @@ fn menu_options(
                     .contains(&String::from("english"))
                 {
                     display_language.0 = "english";
-                } else if choice
+                }
+
+                if choice
                     .dialog
                     .actions
                     .events_changed_on_exit
@@ -419,7 +446,63 @@ fn menu_options(
                     display_language.0 = "spanish";
                 }
 
-                let menu_id = if resume_game.0 {
+                if choice
+                    .dialog
+                    .actions
+                    .events_changed_on_exit
+                    .contains(&String::from("play music"))
+                {
+                    volumes
+                        .volumes
+                        .iter_mut()
+                        .find(|a| a.category == "music")
+                        .unwrap()
+                        .volume = 0.30;
+                }
+
+                if choice
+                    .dialog
+                    .actions
+                    .events_changed_on_exit
+                    .contains(&String::from("stop music"))
+                {
+                    volumes
+                        .volumes
+                        .iter_mut()
+                        .find(|a| a.category == "music")
+                        .unwrap()
+                        .volume = 0.00;
+                }
+
+                if choice
+                    .dialog
+                    .actions
+                    .events_changed_on_exit
+                    .contains(&String::from("play sfx"))
+                {
+                    volumes
+                        .volumes
+                        .iter_mut()
+                        .find(|a| a.category == "sfx")
+                        .unwrap()
+                        .volume = 0.80;
+                }
+
+                if choice
+                    .dialog
+                    .actions
+                    .events_changed_on_exit
+                    .contains(&String::from("stop sfx"))
+                {
+                    volumes
+                        .volumes
+                        .iter_mut()
+                        .find(|a| a.category == "sfx")
+                        .unwrap()
+                        .volume = 0.00;
+                }
+
+                let menu_id = if resume_game.resume {
                     "pause menu"
                 } else {
                     "main menu"
