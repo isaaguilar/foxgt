@@ -284,10 +284,12 @@ fn main() {
             (
                 motor_sfx,
                 game_level_system,
-                keyboad_input_change_system,
+                road_system,
                 road_line_system,
                 car_intersection_system,
                 reset,
+                shop_spawn_system,
+                movement_input_system,
                 dialog_display_system,
                 dialog_choice_selection_system,
             )
@@ -731,7 +733,7 @@ fn sound_controller(
             audio.play();
         }
     } else {
-        for (audio, in_game_sound) in in_game_sounds.iter() {
+        for (audio, _) in in_game_sounds.iter() {
             audio.pause();
         }
     }
@@ -977,17 +979,156 @@ fn road_line_system(
     }
 }
 
-fn keyboad_input_change_system(
+#[derive(Component)]
+pub struct ShopMarker;
+
+fn shop_spawn_system(
     mut commands: Commands,
-    assest_server: Res<AssetServer>,
+    asset_server: Res<AssetServer>,
+    time: Res<Time>,
+    spawn_thing_timer: Res<SpawnThingTimer>,
+    selections: Query<&SelectionMarker>,
+    mut shop_query: Query<(Entity, &mut Transform), With<ShopMarker>>,
+    player_query: Query<(&Sprite, &PlayerCar), With<PlayerMarker>>,
+) {
+    if !selections.is_empty() {
+        return;
+    }
+
+    let (player_sprite, player_car) = player_query.single();
+    let facing_left = player_sprite.flip_x;
+
+    for (entity, mut shop_transform) in shop_query.iter_mut() {
+        if shop_transform.translation.x > (WINDOW_X / 2.) + 300.
+            || shop_transform.translation.x < -(WINDOW_X / 2.) - 300.
+        {
+            commands.entity(entity).despawn_recursive();
+            continue;
+        }
+
+        if facing_left {
+            shop_transform.translation.x += SPEED_X * player_car.speed_coeff * time.delta_secs();
+        } else {
+            shop_transform.translation.x -= SPEED_X * player_car.speed_coeff * time.delta_secs();
+        }
+    }
+
+    if shop_query.is_empty() {
+        if spawn_thing_timer.timer.just_finished() {
+            if random_bool_one_in_n(20) {
+                commands
+                    .spawn((
+                        GameState,
+                        ShopMarker,
+                        Sprite {
+                            flip_x: false,
+                            // texture_atlas: Some(TextureAtlas {
+                            //     // layout: texture_atlas_layouts.add(TextureAtlasLayout::from_grid(
+                            //     //     UVec2::new(9, 22),
+                            //     //     27,
+                            //     //     1,
+                            //     //     None,
+                            //     //     None,
+                            //     // )),
+                            //     // index: sprite_index.clone(),
+                            // }),
+                            image: asset_server.load("mechanicshop.png"),
+                            ..default()
+                        },
+                    ))
+                    .insert(
+                        Transform::from_xyz((WINDOW_X / 2.) + 151., PERSON_Y_BOTTOM + 25., 10.)
+                            .with_scale(Vec3::splat(2.25)),
+                    );
+            }
+        }
+    }
+}
+
+fn movement_input_system(
+    time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    mut player_query: Query<(&mut Transform, &mut Sprite, &mut PlayerCar)>,
+    selections: Query<&SelectionMarker>,
+) {
+    if !selections.is_empty() {
+        return;
+    }
+    let (right, left, gas, up, down) = match gamepads.iter().next() {
+        Some(gamepad) => {
+            let left_stick_x = gamepad.get(GamepadAxis::LeftStickX).unwrap();
+            let left_stick_y = gamepad.get(GamepadAxis::LeftStickY).unwrap();
+
+            (
+                left_stick_x > 0.075,  //right
+                left_stick_x < -0.075, //left
+                gamepad.any_pressed([
+                    GamepadButton::North,
+                    GamepadButton::South,
+                    GamepadButton::East,
+                    GamepadButton::West,
+                ]),
+                left_stick_y > 0.075, //up
+                left_stick_y < -0.75, //down
+            )
+        }
+        None => (false, false, false, false, false),
+    };
+
+    let right = right || keyboard.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]);
+    let left = left || keyboard.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]);
+    let gas = gas || keyboard.pressed(KeyCode::Space);
+    let up_just_pressed = up
+        || keyboard.pressed(KeyCode::ArrowUp)
+        || keyboard.any_just_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
+    let down_just_pressed = down || keyboard.any_just_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
+
+    let (mut player_transform, mut player_sprite, mut player_car) = player_query.single_mut();
+    let player_y = player_transform.translation.y;
+    let player_x = player_transform.translation.x;
+
+    if player_car.speed_coeff == 0.0 {
+        if right {
+            player_sprite.flip_x = false;
+        }
+        if left {
+            player_sprite.flip_x = true;
+        }
+    }
+    if gas {
+        player_car.speed_coeff = (player_car.speed_coeff + (1. * time.delta_secs())).min(1.0);
+    } else {
+        player_car.speed_coeff = (player_car.speed_coeff - (1. * time.delta_secs())).max(0.0);
+    }
+
+    player_car.rate_limit_up.tick(time.delta());
+    player_car.rate_limit_down.tick(time.delta());
+    if up_just_pressed && player_y < LANE_HEIGHT {
+        if player_car.rate_limit_up.finished() || player_car.rate_limit_up.just_finished() {
+            player_car.rate_limit_up.reset();
+            player_transform.translation.y += LANE_HEIGHT;
+            player_car.aabb.translate_by(vec2(0.0, LANE_HEIGHT));
+        }
+    }
+    if down_just_pressed && player_y > -LANE_HEIGHT {
+        if player_car.rate_limit_down.finished() || player_car.rate_limit_down.just_finished() {
+            player_car.rate_limit_down.reset();
+            player_transform.translation.y -= LANE_HEIGHT;
+            player_car.aabb.translate_by(vec2(0.0, -LANE_HEIGHT));
+        }
+    }
+}
+
+fn road_system(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
     mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut travel: ResMut<Travel>,
     time: Res<Time>,
     mut dialog_message: ResMut<structured_dialog::DialogMessage>,
     game_script_asset: Res<Assets<structured_dialog::GameScript>>,
     mut spawn_thing_timer: ResMut<SpawnThingTimer>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    gamepads: Query<&Gamepad>,
     mut car_query: Query<
         (Entity, &mut Transform, &mut Car),
         (With<CarMarker>, Without<RoadMarker>, Without<PlayerMarker>),
@@ -1031,47 +1172,8 @@ fn keyboad_input_change_system(
         Some(d) => d.1,
         None => &structured_dialog::GameScript::default(),
     };
-
-    let (right, left, gas, up, down) = match gamepads.iter().next() {
-        Some(gamepad) => {
-            let left_stick_x = gamepad.get(GamepadAxis::LeftStickX).unwrap();
-            let left_stick_y = gamepad.get(GamepadAxis::LeftStickY).unwrap();
-
-            (
-                left_stick_x > 0.075,  //right
-                left_stick_x < -0.075, //left
-                gamepad.any_pressed([
-                    GamepadButton::North,
-                    GamepadButton::South,
-                    GamepadButton::East,
-                    GamepadButton::West,
-                ]),
-                left_stick_y > 0.075, //up
-                left_stick_y < -0.75, //down
-            )
-        }
-        None => (false, false, false, false, false),
-    };
-
-    let right = right || keyboard.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]);
-    let left = left || keyboard.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]);
-    let gas = gas || keyboard.pressed(KeyCode::Space);
-    let up_just_pressed = up
-        || keyboard.pressed(KeyCode::ArrowUp)
-        || keyboard.any_just_pressed([KeyCode::KeyW, KeyCode::ArrowUp]);
-    let down_just_pressed = down || keyboard.any_just_pressed([KeyCode::KeyS, KeyCode::ArrowDown]);
-
-    let (mut player_transform, mut player_sprite, mut player_car) = player_query.single_mut();
+    let (player_transform, mut player_sprite, mut player_car) = player_query.single_mut();
     player_car.timer.tick(time.delta());
-
-    if player_car.speed_coeff == 0.0 {
-        if right {
-            player_sprite.flip_x = false;
-        }
-        if left {
-            player_sprite.flip_x = true;
-        }
-    }
     let player_y = player_transform.translation.y;
     let player_x = player_transform.translation.x;
     let facing_left = player_sprite.flip_x;
@@ -1081,7 +1183,6 @@ fn keyboad_input_change_system(
     } else {
         player_car.atlas_right
     };
-
     if player_car.speed_coeff > 0.0 {
         if player_car.timer.just_finished() {
             if let Some(atlas) = &mut player_sprite.texture_atlas {
@@ -1095,28 +1196,6 @@ fn keyboad_input_change_system(
     } else {
         if let Some(atlas) = &mut player_sprite.texture_atlas {
             atlas.index = atlas_min;
-        }
-    }
-    if gas {
-        player_car.speed_coeff = (player_car.speed_coeff + (1. * time.delta_secs())).min(1.0);
-    } else {
-        player_car.speed_coeff = (player_car.speed_coeff - (1. * time.delta_secs())).max(0.0);
-    }
-
-    player_car.rate_limit_up.tick(time.delta());
-    player_car.rate_limit_down.tick(time.delta());
-    if up_just_pressed && player_y < LANE_HEIGHT {
-        if player_car.rate_limit_up.finished() || player_car.rate_limit_up.just_finished() {
-            player_car.rate_limit_up.reset();
-            player_transform.translation.y += LANE_HEIGHT;
-            player_car.aabb.translate_by(vec2(0.0, LANE_HEIGHT));
-        }
-    }
-    if down_just_pressed && player_y > -LANE_HEIGHT {
-        if player_car.rate_limit_down.finished() || player_car.rate_limit_down.just_finished() {
-            player_car.rate_limit_down.reset();
-            player_transform.translation.y -= LANE_HEIGHT;
-            player_car.aabb.translate_by(vec2(0.0, -LANE_HEIGHT));
         }
     }
 
@@ -1356,7 +1435,7 @@ fn keyboad_input_change_system(
                                         ),
                                         index: info.passenger.sprite_index,
                                     }),
-                                    image: assest_server.load("person-Sheet.png"),
+                                    image: asset_server.load("person-Sheet.png"),
                                     ..default()
                                 },
                             ))
@@ -1443,6 +1522,7 @@ fn keyboad_input_change_system(
     spawn_thing_timer.timer.tick(time.delta());
     if spawn_thing_timer.timer.just_finished() {
         let mut rng = rand::thread_rng();
+
         let y = if random_bool_one_in_n(2) {
             PERSON_Y_TOP
         } else {
@@ -1477,7 +1557,7 @@ fn keyboad_input_change_system(
                         )),
                         index: sprite_index.clone(),
                     }),
-                    image: assest_server.load("person-Sheet.png"),
+                    image: asset_server.load("person-Sheet.png"),
                     ..default()
                 },
             ))
@@ -1488,7 +1568,7 @@ fn keyboad_input_change_system(
                         .spawn((
                             GameState,
                             Sprite {
-                                image: assest_server.load("player-outline.png"),
+                                image: asset_server.load("player-outline.png"),
                                 ..default()
                             },
                         ))
@@ -1504,7 +1584,7 @@ fn keyboad_input_change_system(
                         .spawn((
                             GameState,
                             Sprite {
-                                image: assest_server.load("exclaimation.png"),
+                                image: asset_server.load("exclaimation.png"),
                                 ..default()
                             },
                         ))
@@ -1552,7 +1632,7 @@ fn keyboad_input_change_system(
                     Sprite {
                         flip_x: flip_x,
                         color: Color::linear_rgb(red, green, blue),
-                        image: assest_server.load("car_plain.png"),
+                        image: asset_server.load("car_plain.png"),
                         ..default()
                     },
                 ))
