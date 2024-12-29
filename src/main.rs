@@ -1,23 +1,11 @@
 use bevy::{
     audio::{PlaybackMode, Volume},
-    ecs::query,
-    input::keyboard::Key,
-    math::{
-        bounding::{Aabb2d, BoundingVolume, IntersectsVolume},
-        vec2, NormedVectorSpace,
-    },
+    math::bounding::{Aabb2d, BoundingVolume, IntersectsVolume},
     prelude::*,
-    render::{camera::ScalingMode, view::visibility},
-    state::commands,
-    text,
-    utils::hashbrown::HashMap,
+    render::camera::ScalingMode,
 };
 use bevy_common_assets::json::JsonAssetPlugin;
-use rand::prelude::SliceRandom;
 use rand::Rng;
-use std::{ops::DerefMut, thread::spawn};
-use structured_dialog::Choice;
-
 use util::window::PixelScale;
 
 mod menu;
@@ -89,7 +77,7 @@ pub struct InteractionRateLimit(pub Timer);
 pub struct SelectionMarker(pub String);
 
 #[derive(Component, Default)]
-struct Intersects(bool);
+struct Intersects;
 
 #[derive(Resource, Default)]
 pub struct Taxi {
@@ -228,6 +216,8 @@ fn main() {
                 primary_window: Some(Window {
                     title: "TaxiGT".to_string(),
                     resolution: (WINDOW_X, WINDOW_Y).into(),
+                    fit_canvas_to_parent: true,
+                    prevent_default_event_handling: false,
                     visible: true,
                     ..default()
                 }),
@@ -321,7 +311,7 @@ fn setup(
     mut dialog_message: ResMut<structured_dialog::DialogMessage>,
 ) {
     let rba_dark_gray = 0.025;
-    bg.0 = Color::linear_rgba(rba_dark_gray, rba_dark_gray, rba_dark_gray, 0.0);
+    bg.0 = Color::linear_rgba(rba_dark_gray, rba_dark_gray, rba_dark_gray, 1.0);
     commands.spawn((
         GameState,
         GameCamera,
@@ -689,7 +679,7 @@ fn setup(
         .unwrap()
         .clone();
     commands.spawn((
-        MotorSound(String::from("motor")),
+        MotorSound,
         vol.clone(),
         AudioPlayer::new(asset_server.load("motor.mp3")),
         PlaybackSettings {
@@ -816,7 +806,7 @@ fn car_intersection_system(
 }
 
 #[derive(Component)]
-pub struct MotorSound(String);
+pub struct MotorSound;
 
 fn motor_sfx(
     player_query: Query<&PlayerCar, With<PlayerMarker>>,
@@ -956,7 +946,7 @@ fn road_line_system(
     mut commands: Commands,
     time: Res<Time>,
     dialog_message: Res<structured_dialog::DialogMessage>,
-    mut road_query: Query<(&mut Transform), With<RoadMarker>>,
+    mut road_query: Query<&mut Transform, With<RoadMarker>>,
     mut roadside_query: Query<(Entity, &mut Transform, &mut RoadsideObject), Without<RoadMarker>>,
     player_query: Query<(&Sprite, &PlayerCar), With<PlayerMarker>>,
 ) {
@@ -1206,7 +1196,7 @@ fn movement_input_system(
 
     let (mut player_transform, mut player_sprite, mut player_car) = player_query.single_mut();
     let player_y = player_transform.translation.y;
-    let player_x = player_transform.translation.x;
+    let _player_x = player_transform.translation.x;
 
     if player_car.speed_coeff == 0.0 {
         if right {
@@ -1228,14 +1218,14 @@ fn movement_input_system(
         if player_car.rate_limit_up.finished() || player_car.rate_limit_up.just_finished() {
             player_car.rate_limit_up.reset();
             player_transform.translation.y += LANE_HEIGHT;
-            player_car.aabb.translate_by(vec2(0.0, LANE_HEIGHT));
+            player_car.aabb.translate_by(Vec2::new(0.0, LANE_HEIGHT));
         }
     }
     if down_just_pressed && player_y > -LANE_HEIGHT {
         if player_car.rate_limit_down.finished() || player_car.rate_limit_down.just_finished() {
             player_car.rate_limit_down.reset();
             player_transform.translation.y -= LANE_HEIGHT;
-            player_car.aabb.translate_by(vec2(0.0, -LANE_HEIGHT));
+            player_car.aabb.translate_by(Vec2::new(0.0, -LANE_HEIGHT));
         }
     }
 }
@@ -1411,14 +1401,14 @@ fn road_system(
         false
     };
 
-    for (person_entity, mut person_global_transform, mut visibility, _) in
+    for (_person_entity, person_global_transform, mut visibility, _) in
         person_highlight_query.iter_mut()
     {
         let global_transform = person_global_transform.compute_transform();
         let x = global_transform.translation.x;
         let y = global_transform.translation.y;
 
-        let is_visible = if (facing_left && x < 50. && player_y > 100. && y > 0.)
+        let _is_visible = if (facing_left && x < 50. && player_y > 100. && y > 0.)
             || (facing_left && x < 50. && player_y < -100. && y < 0.)
         {
             *visibility = Visibility::Visible;
@@ -1816,7 +1806,7 @@ pub fn dialog_display_system(
 
                                 // let total_choices = choices.len();
 
-                                for (index, choice) in choices.iter().enumerate() {
+                                for (_index, choice) in choices.iter().enumerate() {
                                     // info!("Adding choice #{}", index);
                                     // let style = dialog_textbox.0.clone();
                                     let choice_id = choice.choice.clone();
@@ -1857,11 +1847,11 @@ pub fn reset(
     mut player_data: ResMut<PlayerHealth>,
     mut taxi: ResMut<Taxi>,
     mut current_selection: ResMut<CurrentSelection>,
-    mut car_query: Query<
+    car_query: Query<
         (Entity, &mut Transform, &mut Car),
         (With<CarMarker>, Without<RoadMarker>, Without<PlayerMarker>),
     >,
-    mut person_query: Query<
+    person_query: Query<
         (Entity, &mut Transform, &Passenger),
         (
             With<PersonMarker>,
@@ -1897,7 +1887,6 @@ pub struct ResumeGame {
 }
 
 pub fn dialog_choice_selection_system(
-    mut commands: Commands,
     time: Res<Time>,
     display_language: Res<DisplayLanguage>,
     mut interaction_rate_limit: ResMut<InteractionRateLimit>,
@@ -1914,7 +1903,7 @@ pub fn dialog_choice_selection_system(
     mut app_state: ResMut<NextState<AppState>>,
     mut resume_game: ResMut<ResumeGame>,
 ) {
-    let (right, left, gas, up, down, pause) = match gamepads.iter().next() {
+    let (_right, _left, gas, up, down, pause) = match gamepads.iter().next() {
         Some(gamepad) => {
             let left_stick_x = gamepad.get(GamepadAxis::LeftStickX).unwrap();
             let left_stick_y = gamepad.get(GamepadAxis::LeftStickY).unwrap();

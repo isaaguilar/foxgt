@@ -1,6 +1,4 @@
 use rand::prelude::IteratorRandom;
-use rand::prelude::SliceRandom;
-use rand::Rng;
 
 pub fn name() -> String {
     format!("{} {}", first_name(), last_name())

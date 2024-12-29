@@ -1,6 +1,3 @@
-use std::thread::current;
-
-use crate::menu;
 use crate::structured_dialog;
 use crate::structured_dialog::Dialog;
 use crate::util;
@@ -12,19 +9,10 @@ use crate::DisplayLanguage;
 use crate::InteractionRateLimit;
 use crate::ResumeGame;
 use crate::SelectionMarker;
-
-use bevy::utils::hashbrown::HashMap;
 use bevy::{prelude::*, render::view::RenderLayers};
-use bevy_common_assets::json::JsonAssetPlugin;
 
 #[derive(Component)]
 pub struct MenuScreen;
-
-#[derive(Component)]
-pub struct MenuScrollControl {
-    pub rate_limit_selection: Timer,
-    pub selection_index: usize,
-}
 
 #[derive(Resource, Clone, Deref, DerefMut)]
 pub struct LastDialog(pub Option<Dialog>);
@@ -48,12 +36,8 @@ impl Plugin for MenuPlugin {
 #[derive(Component)]
 struct MenuCamera;
 
-#[derive(Component)]
-pub struct TextSectionLabels(pub Vec<&'static str>);
-
 fn menu_setup(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
     mut bg: ResMut<ClearColor>,
     resume_game: Res<ResumeGame>,
     mut last_dialog: ResMut<LastDialog>,
@@ -201,7 +185,7 @@ pub fn menu_system(
 
                             // let total_choices = choices.len();
 
-                            for (index, choice) in choices.iter().enumerate() {
+                            for (_index, choice) in choices.iter().enumerate() {
                                 // info!("Adding choice #{}", index);
                                 // let style = dialog_textbox.0.clone();
                                 let choice_id = choice.choice.clone();
@@ -235,25 +219,21 @@ pub fn menu_system(
     return;
 }
 
-#[derive(Resource)]
-pub struct ResetGame(bool);
-
 pub fn menu_selection_system(
-    mut commands: Commands,
     game_script_asset: Res<Assets<structured_dialog::GameScript>>,
     time: Res<Time>,
-    mut display_language: ResMut<DisplayLanguage>,
+    display_language: ResMut<DisplayLanguage>,
     mut interaction_rate_limit: ResMut<InteractionRateLimit>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     resume_game: Res<ResumeGame>,
-    mut volumes: ResMut<crate::Volumes>,
+    volumes: ResMut<crate::Volumes>,
     mut current_selection: ResMut<CurrentSelection>,
-    mut dialog_message: ResMut<structured_dialog::DialogMessage>,
+    dialog_message: ResMut<structured_dialog::DialogMessage>,
     mut selections: Query<(&SelectionMarker, &mut TextSpan)>,
-    mut app_state: ResMut<NextState<AppState>>,
+    app_state: ResMut<NextState<AppState>>,
 ) {
-    let (right, left, gas, up, down, pause) = match gamepads.iter().next() {
+    let (_right, _left, gas, up, down, _pause) = match gamepads.iter().next() {
         Some(gamepad) => {
             let left_stick_x = gamepad.get(GamepadAxis::LeftStickX).unwrap();
             let left_stick_y = gamepad.get(GamepadAxis::LeftStickY).unwrap();

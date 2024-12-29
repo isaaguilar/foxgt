@@ -18,8 +18,8 @@ pub fn hud_scale_updater(mut pixel_scale: ResMut<PixelScale>, windows: Query<&Wi
     let window_y = windows.single().resolution.size().y;
     let window_x = windows.single().resolution.size().x;
     // Maintain 16:9 aspect ratio calculations, even when not correct in window
-    let normalized_x = 16.0 * window_y / 9.;
-    let normalized_y = 9. * window_x / 16.0;
+    let _normalized_x = 16.0 * window_y / 9.;
+    let _normalized_y = 9. * window_x / 16.0;
     pixel_scale.0 = windows.single().resolution.size().x / WINDOW_X;
     pixel_scale.1 = windows.single().resolution.size().y / WINDOW_Y;
 }
