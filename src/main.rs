@@ -1,3 +1,4 @@
+use bevy::asset::AssetMetaCheck;
 use bevy::{
     audio::{PlaybackMode, Volume},
     math::bounding::{Aabb2d, BoundingVolume, IntersectsVolume},
@@ -212,17 +213,22 @@ fn main() {
     App::new()
         .add_systems(Startup, load_json)
         .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "TaxiGT".to_string(),
-                    resolution: (WINDOW_X, WINDOW_Y).into(),
-                    fit_canvas_to_parent: true,
-                    prevent_default_event_handling: false,
-                    visible: true,
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "TaxiGT".to_string(),
+                        resolution: (WINDOW_X, WINDOW_Y).into(),
+                        fit_canvas_to_parent: true,
+                        prevent_default_event_handling: false,
+                        visible: true,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(AssetPlugin {
+                    meta_check: AssetMetaCheck::Never,
                     ..default()
                 }),
-                ..default()
-            }),
             JsonAssetPlugin::<structured_dialog::GameScript>::new(&[".json"]),
             splash::SplashPlugin,
             menu::MenuPlugin,
