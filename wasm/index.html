@@ -1,7 +1,35 @@
 <!doctype html>
+
+<head>
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+        }
+
+        body {
+            display: flex;
+            display: -webkit-flex;
+            -webkit-justify-content: center;
+            justify-content: center;
+            -webkit-align-items: center;
+            align-items: center;
+        }
+
+        canvas {
+            display: block;
+            outline: none;
+            height: 100%;
+            max-height: 133.333vw;
+            width: 100%;
+            /* max-width: 75vh; */
+        }
+    </style>
+</head>
 <html lang="en">
 
-<body style="margin: 0px;">
+<body style="margin: 0px">
     <script type="module">
         import './restart-audio-context.js'
         import init from './bevy_game.js'

@@ -216,6 +216,7 @@ fn main() {
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
+                        resizable: true,
                         title: "TaxiGT".to_string(),
                         resolution: (WINDOW_X, WINDOW_Y).into(),
                         fit_canvas_to_parent: true,

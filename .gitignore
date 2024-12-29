@@ -1,2 +1,6 @@
 /target
 .vscode
+wasm/bevy_game_bg.wasm
+wasm/bevy_game.js
+wasm/assets
+*.zip

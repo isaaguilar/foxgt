@@ -44,6 +44,7 @@ pub struct ChoiceDialog {
 }
 
 #[derive(Resource, Debug, Default)]
+#[allow(dead_code)]
 pub struct DialogHandle(pub Handle<GameScript>);
 
 #[derive(Resource, Default, Clone)]
