@@ -15,7 +15,7 @@ use bevy::{
 use bevy_common_assets::json::JsonAssetPlugin;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use std::ops::DerefMut;
+use std::{ops::DerefMut, thread::spawn};
 use structured_dialog::Choice;
 
 use util::window::PixelScale;
@@ -123,6 +123,7 @@ pub struct Posessions(pub Vec<String>);
 #[derive(Resource)]
 pub struct SpawnThingTimer {
     timer: Timer,
+    allow_shop: bool,
 }
 
 #[derive(Resource)]
@@ -273,6 +274,7 @@ fn main() {
         .insert_resource(PixelScale(1.0, 1.0))
         .insert_resource(SpawnThingTimer {
             timer: Timer::from_seconds(0.2, TimerMode::Repeating),
+            allow_shop: false,
         })
         .add_systems(OnEnter(AppState::Game), (sound_controller, setup))
         .add_systems(
@@ -289,6 +291,7 @@ fn main() {
                 car_intersection_system,
                 reset,
                 shop_spawn_system,
+                person_spawn_system,
                 movement_input_system,
                 dialog_display_system,
                 dialog_choice_selection_system,
@@ -821,7 +824,7 @@ fn motor_sfx(
 ) {
     for player_car in player_query.iter() {
         let s = 0.5 * player_car.speed_coeff + 0.5;
-        info!(s);
+        // info!(s);
         for audio in speed_sound.iter() {
             audio.set_speed(s);
         }
@@ -922,8 +925,8 @@ fn game_level_system(
         }
     }
 
-    if player_data.time_limit.just_finished() {
-        if player_data.earnings > player_data.time_limit_required_earnings {
+    if player_data.time_limit.just_finished() || player_data.time_limit.finished() {
+        if player_data.earnings >= player_data.time_limit_required_earnings {
             player_data.cycles_completed += 1;
             player_data.time_limit.reset();
             player_data.earnings = 0.0;
@@ -938,7 +941,7 @@ fn game_level_system(
 
             // info!("{}", 1. + x);
             player_data.time_limit_required_earnings = (49.0_f32.powf(1. + x)).ceil();
-        } else {
+        } else if current_rider.is_none() {
             let game_over = game_script
                 .dialogs
                 .iter()
@@ -950,9 +953,11 @@ fn game_level_system(
 }
 
 fn road_line_system(
+    mut commands: Commands,
     time: Res<Time>,
     dialog_message: Res<structured_dialog::DialogMessage>,
     mut road_query: Query<(&mut Transform), With<RoadMarker>>,
+    mut roadside_query: Query<(Entity, &mut Transform, &mut RoadsideObject), Without<RoadMarker>>,
     player_query: Query<(&Sprite, &PlayerCar), With<PlayerMarker>>,
 ) {
     if let Some(dialog) = &dialog_message.dialog {
@@ -964,6 +969,8 @@ fn road_line_system(
     let (player_sprite, player_car) = player_query.single();
     let facing_left = player_sprite.flip_x;
 
+    let player_translation_speed = SPEED_X * player_car.speed_coeff * time.delta_secs();
+
     for mut road_transform in road_query.iter_mut() {
         if road_transform.translation.x > (WINDOW_X / 2.) + 42. {
             road_transform.translation.x = -(WINDOW_X / 2.) - 42.
@@ -972,9 +979,30 @@ fn road_line_system(
         }
 
         if facing_left {
-            road_transform.translation.x += SPEED_X * player_car.speed_coeff * time.delta_secs();
+            road_transform.translation.x += player_translation_speed;
         } else {
-            road_transform.translation.x -= SPEED_X * player_car.speed_coeff * time.delta_secs();
+            road_transform.translation.x -= player_translation_speed;
+        }
+    }
+
+    for (entity, mut roadside_transform, mut roadside_object) in roadside_query.iter_mut() {
+        if roadside_transform.translation.x > (WINDOW_X / 2.) + 300.
+            || roadside_transform.translation.x < -(WINDOW_X / 2.) - 300.
+        {
+            commands.entity(entity).despawn_recursive();
+            continue;
+        }
+
+        if facing_left {
+            roadside_transform.translation.x += player_translation_speed;
+            roadside_object
+                .aabb
+                .translate_by(Vec2::new(player_translation_speed, 0.0));
+        } else {
+            roadside_transform.translation.x -= player_translation_speed;
+            roadside_object
+                .aabb
+                .translate_by(Vec2::new(-player_translation_speed, 0.0));
         }
     }
 }
@@ -982,65 +1010,157 @@ fn road_line_system(
 #[derive(Component)]
 pub struct ShopMarker;
 
+#[derive(Component)]
+pub struct RoadsideObject {
+    aabb: Aabb2d,
+}
+
 fn shop_spawn_system(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    time: Res<Time>,
     spawn_thing_timer: Res<SpawnThingTimer>,
     selections: Query<&SelectionMarker>,
-    mut shop_query: Query<(Entity, &mut Transform), With<ShopMarker>>,
-    player_query: Query<(&Sprite, &PlayerCar), With<PlayerMarker>>,
+    shop_query: Query<(Entity, &mut Transform), With<ShopMarker>>,
+    roadside_object_query: Query<&RoadsideObject>,
 ) {
     if !selections.is_empty() {
         return;
     }
 
-    let (player_sprite, player_car) = player_query.single();
-    let facing_left = player_sprite.flip_x;
-
-    for (entity, mut shop_transform) in shop_query.iter_mut() {
-        if shop_transform.translation.x > (WINDOW_X / 2.) + 300.
-            || shop_transform.translation.x < -(WINDOW_X / 2.) - 300.
-        {
-            commands.entity(entity).despawn_recursive();
-            continue;
-        }
-
-        if facing_left {
-            shop_transform.translation.x += SPEED_X * player_car.speed_coeff * time.delta_secs();
-        } else {
-            shop_transform.translation.x -= SPEED_X * player_car.speed_coeff * time.delta_secs();
-        }
-    }
+    let x = (WINDOW_X / 2.) + 151.;
+    let y = PERSON_Y_BOTTOM + 25.;
 
     if shop_query.is_empty() {
-        if spawn_thing_timer.timer.just_finished() {
-            if random_bool_one_in_n(20) {
-                commands
-                    .spawn((
-                        GameState,
-                        ShopMarker,
-                        Sprite {
-                            flip_x: false,
-                            // texture_atlas: Some(TextureAtlas {
-                            //     // layout: texture_atlas_layouts.add(TextureAtlasLayout::from_grid(
-                            //     //     UVec2::new(9, 22),
-                            //     //     27,
-                            //     //     1,
-                            //     //     None,
-                            //     //     None,
-                            //     // )),
-                            //     // index: sprite_index.clone(),
-                            // }),
-                            image: asset_server.load("mechanicshop.png"),
-                            ..default()
-                        },
-                    ))
-                    .insert(
-                        Transform::from_xyz((WINDOW_X / 2.) + 151., PERSON_Y_BOTTOM + 25., 10.)
-                            .with_scale(Vec3::splat(2.25)),
-                    );
+        if spawn_thing_timer.timer.just_finished() && spawn_thing_timer.allow_shop {
+            if random_bool_one_in_n(5) {
+                let new_volume = Aabb2d {
+                    min: Vec2::new(x - 2.25 * 96.0 / 2.0, y - 2.25 * 65.0 / 2.0),
+                    max: Vec2::new(x + 2.25 * 96.0 / 2.0, y + 2.25 * 65.0 / 2.0),
+                };
+
+                if let None = roadside_object_query.iter().find(|roadside_object| {
+                    new_volume.intersects(&roadside_object.aabb)
+                        || roadside_object.aabb.contains(&new_volume)
+                        || new_volume.contains(&roadside_object.aabb)
+                }) {
+                    // info!(?new_volume);
+                    commands
+                        .spawn((
+                            GameState,
+                            ShopMarker,
+                            RoadsideObject { aabb: new_volume },
+                            Sprite {
+                                flip_x: false,
+                                image: asset_server.load("mechanicshop.png"),
+                                ..default()
+                            },
+                        ))
+                        .insert(Transform::from_xyz(x, y, 10.).with_scale(Vec3::splat(2.25)));
+                }
             }
+        }
+    }
+}
+
+fn person_spawn_system(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
+    spawn_thing_timer: Res<SpawnThingTimer>,
+    roadside_object_query: Query<&RoadsideObject>,
+    selections: Query<&SelectionMarker>,
+) {
+    if !selections.is_empty() {
+        return;
+    }
+    if spawn_thing_timer.timer.just_finished() && !spawn_thing_timer.allow_shop {
+        let mut rng = rand::thread_rng();
+
+        let y = if random_bool_one_in_n(2) {
+            PERSON_Y_TOP
+        } else {
+            PERSON_Y_BOTTOM
+        };
+        let x = if random_bool_one_in_n(2) {
+            (WINDOW_X / 2.) + 151.
+        } else {
+            -(WINDOW_X / 2.) - 151.
+        };
+
+        let new_volume = Aabb2d {
+            min: Vec2::new(x - 9.0 / 2.0, y - 22.0 / 2.0),
+            max: Vec2::new(x + 9.0 / 2.0, y + 22.0 / 2.0),
+        };
+        if let None = roadside_object_query.iter().find(|roadside_object| {
+            new_volume.intersects(&roadside_object.aabb)
+                || roadside_object.aabb.contains(&new_volume)
+                || new_volume.contains(&roadside_object.aabb)
+        }) {
+            // info!("Person volume={:?}", new_volume);
+            let passenger_name = names::name();
+            let sprite_index = rng.gen_range(0..27);
+
+            commands
+                .spawn((
+                    GameState,
+                    RoadsideObject { aabb: new_volume },
+                    PersonMarker,
+                    Passenger {
+                        name: passenger_name.clone(),
+                        sprite_index: sprite_index,
+                    },
+                    Sprite {
+                        flip_x: false,
+                        texture_atlas: Some(TextureAtlas {
+                            layout: texture_atlas_layouts.add(TextureAtlasLayout::from_grid(
+                                UVec2::new(9, 22),
+                                27,
+                                1,
+                                None,
+                                None,
+                            )),
+                            index: sprite_index.clone(),
+                        }),
+                        image: asset_server.load("person-Sheet.png"),
+                        ..default()
+                    },
+                ))
+                .insert(Transform::from_xyz(x, y, 0.))
+                .with_children(|commands| {
+                    if random_bool_one_in_n(5) {
+                        commands
+                            .spawn((
+                                GameState,
+                                Sprite {
+                                    image: asset_server.load("player-outline.png"),
+                                    ..default()
+                                },
+                            ))
+                            .insert(Passenger {
+                                name: passenger_name.clone(),
+                                sprite_index: sprite_index,
+                            })
+                            .insert(PersonHighlightMarker)
+                            .insert(Transform::from_xyz(0., 0., -1.))
+                            .insert(Visibility::Hidden);
+                        let y = 30.;
+                        commands
+                            .spawn((
+                                GameState,
+                                Sprite {
+                                    image: asset_server.load("exclaimation.png"),
+                                    ..default()
+                                },
+                            ))
+                            .insert(Passenger {
+                                name: passenger_name.clone(),
+                                sprite_index: sprite_index,
+                            })
+                            .insert(PersonHighlightMarker)
+                            .insert(Transform::from_xyz(0., y, -1.))
+                            .insert(Visibility::Hidden);
+                    }
+                });
         }
     }
 }
@@ -1419,6 +1539,12 @@ fn road_system(
                         commands
                             .spawn((
                                 GameState,
+                                RoadsideObject {
+                                    aabb: Aabb2d {
+                                        min: Vec2::splat(0.0),
+                                        max: Vec2::splat(0.0),
+                                    },
+                                },
                                 PersonMarker,
                                 info.passenger.clone(),
                                 Sprite {
@@ -1505,98 +1631,10 @@ fn road_system(
         }
     }
 
-    for (person_entity, mut person_transform, _) in person_query.iter_mut() {
-        if person_transform.translation.x > (WINDOW_X / 2.) + 200. {
-            commands.entity(person_entity).despawn_recursive();
-        } else if person_transform.translation.x < -(WINDOW_X / 2.) - 200. {
-            commands.entity(person_entity).despawn_recursive();
-        }
-
-        if facing_left {
-            person_transform.translation.x += SPEED_X * player_car.speed_coeff * time.delta_secs();
-        } else {
-            person_transform.translation.x -= SPEED_X * player_car.speed_coeff * time.delta_secs();
-        }
-    }
-
     spawn_thing_timer.timer.tick(time.delta());
     if spawn_thing_timer.timer.just_finished() {
+        spawn_thing_timer.allow_shop = random_bool_one_in_n(4);
         let mut rng = rand::thread_rng();
-
-        let y = if random_bool_one_in_n(2) {
-            PERSON_Y_TOP
-        } else {
-            PERSON_Y_BOTTOM
-        };
-        let x = if random_bool_one_in_n(2) {
-            (WINDOW_X / 2.) + 51.
-        } else {
-            -(WINDOW_X / 2.) - 51.
-        };
-
-        let passenger_name = names::name();
-        let sprite_index = rng.gen_range(0..27);
-        // code to spawn goes here
-        commands
-            .spawn((
-                GameState,
-                PersonMarker,
-                Passenger {
-                    name: passenger_name.clone(),
-                    sprite_index: sprite_index,
-                },
-                Sprite {
-                    flip_x: false,
-                    texture_atlas: Some(TextureAtlas {
-                        layout: texture_atlas_layouts.add(TextureAtlasLayout::from_grid(
-                            UVec2::new(9, 22),
-                            27,
-                            1,
-                            None,
-                            None,
-                        )),
-                        index: sprite_index.clone(),
-                    }),
-                    image: asset_server.load("person-Sheet.png"),
-                    ..default()
-                },
-            ))
-            .insert(Transform::from_xyz(x, y, 0.))
-            .with_children(|commands| {
-                if random_bool_one_in_n(5) {
-                    commands
-                        .spawn((
-                            GameState,
-                            Sprite {
-                                image: asset_server.load("player-outline.png"),
-                                ..default()
-                            },
-                        ))
-                        .insert(Passenger {
-                            name: passenger_name.clone(),
-                            sprite_index: sprite_index,
-                        })
-                        .insert(PersonHighlightMarker)
-                        .insert(Transform::from_xyz(0., 0., -1.))
-                        .insert(Visibility::Hidden);
-                    let y = 30.;
-                    commands
-                        .spawn((
-                            GameState,
-                            Sprite {
-                                image: asset_server.load("exclaimation.png"),
-                                ..default()
-                            },
-                        ))
-                        .insert(Passenger {
-                            name: passenger_name.clone(),
-                            sprite_index: sprite_index,
-                        })
-                        .insert(PersonHighlightMarker)
-                        .insert(Transform::from_xyz(0., y, -1.))
-                        .insert(Visibility::Hidden);
-                }
-            });
 
         let y = if random_bool_one_in_n(2) {
             LANE_HEIGHT / 2.

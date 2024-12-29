@@ -232,6 +232,22 @@
                             "next_id": "sound"
                         }
                     }
+                },
+                {
+                    "choice": "howto",
+                    "dialog": {
+                        "language": {
+                            "english": "Instrucitons",
+                            "spanish": "Instrucciones"
+                        },
+                        "actions": {
+                            "events_changed_on_enter": [],
+                            "items_changed_on_enter": [],
+                            "events_changed_on_exit": [],
+                            "items_changed_on_exit": [],
+                            "next_id": "howto"
+                        }
+                    }
                 }
             ],
             "actions": {
@@ -317,6 +333,22 @@
                             "events_changed_on_exit": [],
                             "items_changed_on_exit": [],
                             "next_id": "sound"
+                        }
+                    }
+                },
+                {
+                    "choice": "howto",
+                    "dialog": {
+                        "language": {
+                            "english": "Instructions",
+                            "spanish": "Instrucciones"
+                        },
+                        "actions": {
+                            "events_changed_on_enter": [],
+                            "items_changed_on_enter": [],
+                            "events_changed_on_exit": [],
+                            "items_changed_on_exit": [],
+                            "next_id": "howto"
                         }
                     }
                 }
@@ -533,6 +565,41 @@
                             "events_changed_on_exit": [
                                 "stop sfx"
                             ],
+                            "items_changed_on_exit": [],
+                            "next_id": ""
+                        }
+                    }
+                }
+            ],
+            "actions": {
+                "events_changed_on_enter": [],
+                "items_changed_on_enter": [],
+                "events_changed_on_exit": [],
+                "items_changed_on_exit": [],
+                "next_id": ""
+            }
+        },
+        {
+            "id": "howto",
+            "name": "menu",
+            "events": [],
+            "posessions": [],
+            "language": {
+                "english": "How to play:\n\nPress the gas (spacebar) to move. \n\nPick up passengers who have '!' mark. \n\nCollect the 'Target' amount before time runs out.",
+                "spanish": "Cómo jugar:\n\nPara avanzar, presiona el acelerador (barra espaciadora).\n\nSube a los pasajeros que tengan el signo '!'.\n\nGana la carrera contra el tiempo y colecta la cantidad 'Objetivo'."
+            },
+            "choices": [
+                {
+                    "choice": "back",
+                    "dialog": {
+                        "language": {
+                            "english": "Back",
+                            "spanish": "Atrás"
+                        },
+                        "actions": {
+                            "events_changed_on_enter": [],
+                            "items_changed_on_enter": [],
+                            "events_changed_on_exit": [],
                             "items_changed_on_exit": [],
                             "next_id": ""
                         }
