@@ -237,7 +237,7 @@
                     "choice": "howto",
                     "dialog": {
                         "language": {
-                            "english": "Instrucitons",
+                            "english": "Instructions",
                             "spanish": "Instrucciones"
                         },
                         "actions": {
